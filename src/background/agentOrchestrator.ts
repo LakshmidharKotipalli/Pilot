@@ -148,7 +148,7 @@ export class AgentOrchestrator {
       prompt: this.prompt,
       step: this.step,
       maxSteps: this.maxSteps,
-      mode: settings.safeMode ? 'safe' : 'assisted',
+      mode: settings.mode,
       modelId: settings.modelId,
       dryRun: settings.dryRun,
       apiKeySet: apiKey.length > 0,
@@ -416,7 +416,8 @@ export class AgentOrchestrator {
   private async runLoop(ctx: RunCtx, settings: Settings, apiKey: string, goal: string): Promise<void> {
     const tabId = this.tabId!;
     const signal = ctx.controller.signal;
-    const mode: Mode = settings.safeMode ? 'safe' : 'assisted';
+    const mode: Mode = settings.mode;
+    const userGoal = `${this.baseGoal} ${this.prompt}`; // only what the user typed, never model output
     let badTargets = 0;
 
     try {
@@ -537,7 +538,7 @@ export class AgentOrchestrator {
         }
 
         // ---- local risk classification + policy (the model has no say) ----
-        const { assessment, decision } = decide(action, target, map.url, mode);
+        const { assessment, decision } = decide(action, target, map.url, mode, userGoal);
         const proposal: Proposal = {
           actionId: crypto.randomUUID(),
           action,

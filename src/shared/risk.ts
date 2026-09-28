@@ -8,6 +8,8 @@ export interface RiskInput {
   target?: ElementDescriptor | null;
   pageUrl: string;
   mode: Mode;
+  /** What the user actually typed (never model output). Used in autonomous mode to honour explicit requests. */
+  userGoal?: string;
 }
 
 export function keywordHints(text: string): string[] {
@@ -67,6 +69,27 @@ export function describeTarget(t?: ElementDescriptor | null): string {
   return `${kind} “${truncate(name, 80)}”${extras.length ? ` (${extras.join(', ')})` : ''}`;
 }
 
+function normalizePhrase(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * True when the user's own prompt names the control being operated (e.g. prompt "click Add to cart" and
+ * the target is the “Add to cart” button). This is the only way a serious action can skip approval.
+ */
+export function isExplicitlyRequested(target: ElementDescriptor | null | undefined, userGoal: string | undefined): boolean {
+  if (!target || !userGoal) return false;
+  const goal = ` ${normalizePhrase(userGoal)} `;
+  for (const label of [target.name, target.visibleText]) {
+    const phrase = normalizePhrase(label ?? '');
+    if (phrase.length >= 3 && goal.includes(` ${phrase} `)) return true;
+  }
+  return false;
+}
+
 const TEXT_INPUT_TYPES = new Set(['text', 'search', 'email', 'url', 'tel', 'number', '']);
 
 /** Assisted-mode allowlist: low-risk, reversible interactions the extension may auto-run. */
@@ -104,20 +127,25 @@ function isSamePageHash(href: string, pageUrl: string): boolean {
 /**
  * Local, model-independent risk classification. Uncertain → high.
  * In safe mode every mutating action needs approval; in assisted mode only actions outside the
- * low-risk allowlist (or classified high) do.
+ * low-risk allowlist (or classified high) do. In autonomous mode every low-risk action runs on its own;
+ * high-risk ones need approval unless the user's prompt explicitly names the control ("soft" reasons only).
+ * "Hard" reasons (sensitive fields, uploads, unknown targets, odd schemes) always need approval.
  */
-export function assessRisk({ action, target, pageUrl, mode }: RiskInput): RiskAssessment {
-  const finish = (high: string[], low: string[]): RiskAssessment => {
+export function assessRisk({ action, target, pageUrl, mode, userGoal }: RiskInput): RiskAssessment {
+  const finish = (hard: string[], soft: string[], low: string[]): RiskAssessment => {
+    const high = [...hard, ...soft];
     const risk = high.length > 0 ? 'high' : 'low';
-    const requiresConfirmation =
-      mode === 'safe'
-        ? risk === 'high' || isMutating(action)
-        : risk === 'high' || !isAutoEligible(action, target, pageUrl);
-    return {
-      risk,
-      reasons: risk === 'high' ? high : low.length ? low : ['No sensitive indicators found'],
-      requiresConfirmation,
-    };
+    let requiresConfirmation: boolean;
+    let reasons = risk === 'high' ? high : low.length ? low : ['No sensitive indicators found'];
+    if (mode === 'safe') {
+      requiresConfirmation = risk === 'high' || isMutating(action);
+    } else if (mode === 'autonomous') {
+      requiresConfirmation = hard.length > 0 || (soft.length > 0 && !isExplicitlyRequested(target, userGoal));
+      if (risk === 'high' && !requiresConfirmation) reasons = [...high, 'Explicitly requested in your prompt'];
+    } else {
+      requiresConfirmation = risk === 'high' || !isAutoEligible(action, target, pageUrl);
+    }
+    return { risk, reasons, requiresConfirmation };
   };
 
   switch (action.type) {
@@ -132,68 +160,69 @@ export function assessRisk({ action, target, pageUrl, mode }: RiskInput): RiskAs
   }
 
   if (!target) {
-    return finish(['Target is not in the current page map (uncertain)'], []);
+    return finish(['Target is not in the current page map (uncertain)'], [], []);
   }
 
-  const high: string[] = [];
+  const hard: string[] = [];
+  const soft: string[] = [];
   const low: string[] = [];
 
   const labelText = [target.name, target.visibleText, target.label, target.placeholder].filter(Boolean).join(' ');
   const fieldHint = [labelText, target.autocomplete, target.inputType, target.safePathHint].filter(Boolean).join(' ');
 
   if (target.extractOnly && action.type !== 'extract') {
-    high.push('Target is a read-only content region, not a control (uncertain)');
+    hard.push('Target is a read-only content region, not a control (uncertain)');
   }
-  if (target.sensitive) high.push('Target is a password / payment / identity / security field');
-  if (target.inputType === 'file') high.push('File upload control');
+  if (target.sensitive) hard.push('Target is a password / payment / identity / security field');
+  if (target.inputType === 'file') hard.push('File upload control');
   if (target.disabled) low.push('Target is disabled');
 
   if (action.type === 'extract') {
-    return finish(high, ['Reads visible, sanitized content only']);
+    return finish(hard, soft, ['Reads visible, sanitized content only']);
   }
 
   if (action.type === 'type_text') {
-    if (isSensitiveFieldHint(fieldHint)) high.push('Typing into a payment / identity / security / MFA-like field');
-    if (looksSensitiveText(action.text)) high.push('Text to type looks like a card number, SSN or secret');
+    if (isSensitiveFieldHint(fieldHint)) hard.push('Typing into a payment / identity / security / MFA-like field');
+    if (looksSensitiveText(action.text)) hard.push('Text to type looks like a card number, SSN or secret');
     if (action.text.length > 0) low.push('Enters text into a form field');
   } else {
     // click / select_option / set_checked: judge by label + destination
     const hints = new Set<string>([...keywordHints(labelText), ...target.riskHints]);
-    for (const h of hints) high.push(`Label suggests a “${h}” action`);
+    for (const h of hints) soft.push(`Label suggests a “${h}” action`);
     if (isSensitiveFieldHint(fieldHint) && action.type !== 'click') {
-      high.push('Changes a payment / identity / security-related control');
+      hard.push('Changes a payment / identity / security-related control');
     }
   }
 
   if (action.type === 'click') {
-    if (target.isSubmit) high.push('Submits a form');
-    else if (target.inForm && target.tag === 'button') high.push('Button inside a form (may submit it)');
+    if (target.isSubmit) soft.push('Submits a form');
+    else if (target.inForm && target.tag === 'button') soft.push('Button inside a form (may submit it)');
 
     if (target.href) {
       const dest = parseUrl(target.href);
       const page = parseUrl(pageUrl);
       if (!dest) {
-        high.push('Link destination could not be parsed');
+        hard.push('Link destination could not be parsed');
       } else if (dest.protocol !== 'http:' && dest.protocol !== 'https:') {
-        high.push(`Link uses the “${dest.protocol}” scheme`);
+        hard.push(`Link uses the “${dest.protocol}” scheme`);
       } else if (page && dest.origin !== page.origin) {
-        high.push(`Navigates to a new origin (${dest.origin})`);
+        soft.push(`Navigates to a new origin (${dest.origin})`);
       } else if (page && (dest.pathname !== page.pathname || dest.search !== page.search)) {
         low.push('Navigates to another page on the same site');
       } else {
         low.push('Same-page navigation');
       }
       const destKeywords = keywordHints(decodeURIComponentSafe(dest?.pathname ?? ''));
-      for (const h of destKeywords) high.push(`Link destination suggests a “${h}” action`);
+      for (const h of destKeywords) soft.push(`Link destination suggests a “${h}” action`);
     }
 
     const ctx = contextHints(target.nearbyText).filter((c) => c === 'commerce' || c === 'auth' || c === 'account');
     if (ctx.length && (target.inForm || target.tag === 'button' || target.role === 'button')) {
-      high.push(`Sits in a ${ctx.join('/')} context (“${truncate(target.nearbyText, 60)}”)`);
+      soft.push(`Sits in a ${ctx.join('/')} context (“${truncate(target.nearbyText, 60)}”)`);
     }
   }
 
-  return finish(dedupe(high), dedupe(low));
+  return finish(dedupe(hard), dedupe(soft), dedupe(low));
 }
 
 function decodeURIComponentSafe(s: string): string {

@@ -81,7 +81,7 @@ Configure (Settings, opened with **⚙ Settings** in the panel or from the exten
    http only for localhost).
 2. **API key** – pasted once; stored in `chrome.storage.local`, never displayed again.
 3. **Model ID** – whatever your provider calls the model (nothing is hard-coded).
-4. **Maximum agent steps**, **Safe mode** (on by default), optional **Dry run** and **Debug**.
+4. **Maximum agent steps**, **Mode** (Autonomous by default), optional **Dry run** and **Debug**.
 5. Click **Save settings** and accept Chrome’s prompt to let the extension talk to the API host (needed so the service
    worker’s `fetch` is not blocked by CORS).
 
@@ -98,14 +98,18 @@ npm run typecheck   # tsc --noEmit
 
 ## Modes and policy
 
-| | Safe mode (default) | Assisted mode (opt-in) |
-|---|---|---|
-| click / type / select / check | always needs your approval | needs approval unless on the low-risk allowlist |
-| scroll, read-only extract | run without approval (non-mutating; still previewed and logged) | same |
-| auto-run allowlist | – | scroll · expand/collapse (`aria-expanded`, `<summary>`) · switch `role=tab` · focus a non-sensitive text field · read visible text · same-page `#hash` link |
-| always confirm (both modes) | form submit · commerce/payment · login/logout · send/post · account/security/privacy · delete/cancel/unsubscribe · download/upload · permissions · new-origin navigation · sensitive/MFA fields · uncertain targets | same |
+| | Safe | Assisted | Autonomous (default) |
+|---|---|---|---|
+| click / type / select / check | always needs your approval | needs approval unless on the low-risk allowlist | runs on its own when low risk (search, ordinary fields, same-site links, options) |
+| scroll, read-only extract | run without approval (still previewed and logged) | same | same |
+| serious actions (form submit · commerce/payment · send/post · delete/cancel · booking · account changes · downloads · permissions · new-origin navigation) | approval | approval | approval, **unless your prompt explicitly names that control** (e.g. “click Add to cart”) |
+| hard stops (password/payment/identity/MFA fields · card- or SSN-like text · file uploads · non-http links · uncertain targets) | approval | approval | approval, always, even if the prompt names them |
 
-Typing is **never** auto-executed, and the exact literal text is shown in the preview. The model’s own opinion of risk
+In Autonomous mode the check is local and model-independent: a serious action skips approval only when the control's
+label appears as a whole phrase in the prompt you typed. A vague mention (“buy headphones”) does not authorize “Buy now”.
+Blocked-domain rules still apply in every mode.
+
+In Safe and Assisted modes typing is never auto-executed; in all modes the exact literal text is shown in the preview. The model’s own opinion of risk
 is not part of the protocol at all: `shared/risk.ts` classifies from the target’s tag/type/role/labels/autocomplete,
 form membership, link destination/origin, typed text, and nearby headings.
 

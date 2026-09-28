@@ -16,8 +16,9 @@ export function decide(
   target: ElementDescriptor | null | undefined,
   pageUrl: string,
   mode: Mode,
+  userGoal?: string,
 ): PolicyDecision {
-  const assessment = assessRisk({ action, target, pageUrl, mode });
+  const assessment = assessRisk({ action, target, pageUrl, mode, userGoal });
   return { assessment, decision: assessment.requiresConfirmation ? 'confirm' : 'auto' };
 }
 

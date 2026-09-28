@@ -83,7 +83,7 @@ describe('message schemas', () => {
 describe('settings & state machine', () => {
   it('has secure defaults', () => {
     const s = SettingsSchema.parse({});
-    expect(s.safeMode).toBe(true);
+    expect(s.mode).toBe('autonomous');
     expect(s.allowedDomains).toEqual([]);
     expect(s.blockedDomainPatterns.length).toBeGreaterThan(5);
     expect(s.dryRun).toBe(false);
