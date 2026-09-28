@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "WebPilot Agent",
+  "version": "0.1.0",
+  "description": "Side-panel assistant that proposes one safe, confirmed action at a time on the page you are viewing.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Open WebPilot Agent" },
+  "side_panel": { "default_path": "sidepanel/index.html" },
+  "options_ui": { "page": "options/index.html", "open_in_tab": true },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

@@ -1,0 +1,108 @@
+:root {
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --text: #1b1f24;
+  --muted: #5b6570;
+  --border: #d9dde3;
+  --accent: #2b59ff;
+  --accent-text: #ffffff;
+  --low: #0f7b3f;
+  --low-bg: #e3f5ea;
+  --high: #b42318;
+  --high-bg: #fde7e4;
+  --warn-bg: #fff4d6;
+  --warn: #7a5200;
+  --focus: #ff6a00;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171b;
+    --panel: #1c2026;
+    --text: #e7eaee;
+    --muted: #9aa5b1;
+    --border: #2f363f;
+    --accent: #6f8dff;
+    --accent-text: #0b1020;
+    --low: #5fd08d;
+    --low-bg: #12301f;
+    --high: #ff8a7d;
+    --high-bg: #3a1714;
+    --warn-bg: #3a2d0c;
+    --warn: #f5c76b;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+h1 { font-size: 15px; margin: 0; }
+h2 { font-size: 13px; margin: 0 0 6px; }
+.app { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.spread { justify-content: space-between; }
+.muted { color: var(--muted); }
+.small { font-size: 11.5px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+button, select, input, textarea { font: inherit; color: inherit; }
+button {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button.danger { color: var(--high); border-color: var(--high); }
+button.link { border: none; background: none; color: var(--accent); padding: 0; text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+textarea, input[type='text'], input[type='password'], input[type='number'], input[type='url'] {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+textarea { resize: vertical; min-height: 64px; }
+label { display: block; font-weight: 600; margin: 8px 0 3px; }
+label.inline { display: inline-flex; gap: 6px; align-items: center; font-weight: 500; margin: 4px 0; }
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.badge.low { color: var(--low); background: var(--low-bg); border-color: transparent; }
+.badge.high { color: var(--high); background: var(--high-bg); border-color: transparent; }
+.badge.mode-safe { color: var(--low); background: var(--low-bg); border-color: transparent; }
+.badge.mode-assisted { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+.notice { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 8px; }
+.error { background: var(--high-bg); color: var(--high); border-radius: 6px; padding: 8px; }
+.ok { background: var(--low-bg); color: var(--low); border-radius: 6px; padding: 8px; }
+pre {
+  margin: 4px 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+ul.plain { list-style: none; margin: 0; padding: 0; }
+ul.plain li { padding: 5px 0; border-bottom: 1px solid var(--border); }
+ul.plain li:last-child { border-bottom: none; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { border: 1px solid var(--border); padding: 3px 6px; text-align: left; vertical-align: top; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.options { max-width: 720px; margin: 0 auto; padding: 20px; }
+.options .card { margin-bottom: 14px; }
