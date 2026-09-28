@@ -21,6 +21,8 @@ const STATUS_LABEL: Record<string, string> = {
   error: 'Error',
 };
 
+const MODE_LABEL = { safe: 'Safe mode', assisted: 'Assisted mode', autonomous: 'Autonomous mode' } as const;
+
 export default function App() {
   const [state, setState] = useState<PanelState | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -130,7 +132,7 @@ export default function App() {
         </div>
         <div className="row small" style={{ marginTop: 6 }}>
           <span className="muted">Site:</span> <strong>{host ?? 'unknown'}</strong>
-          <span className={`badge mode-${state.mode}`}>{state.mode === 'safe' ? 'Safe mode' : 'Assisted mode'}</span>
+          <span className={`badge mode-${state.mode}`}>{MODE_LABEL[state.mode]}</span>
           <span className="badge">{STATUS_LABEL[state.status]}</span>
         </div>
         <div className="small muted" style={{ marginTop: 4 }}>

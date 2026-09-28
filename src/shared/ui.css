@@ -83,6 +83,7 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; font-weight:
 .badge.low { color: var(--low); background: var(--low-bg); border-color: transparent; }
 .badge.high { color: var(--high); background: var(--high-bg); border-color: transparent; }
 .badge.mode-safe { color: var(--low); background: var(--low-bg); border-color: transparent; }
+.badge.mode-autonomous { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 .badge.mode-assisted { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 .notice { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 8px; }
 .error { background: var(--high-bg); color: var(--high); border-radius: 6px; padding: 8px; }

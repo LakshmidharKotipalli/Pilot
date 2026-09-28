@@ -33,7 +33,7 @@ let store: Record<string, unknown>;
 
 function installChrome() {
   store = {
-    wp_settings: { allowedDomains: ['example.com'], modelId: 'test-model', apiBaseUrl: 'https://api.example.com/v1', safeMode: true },
+    wp_settings: { allowedDomains: ['example.com'], modelId: 'test-model', apiBaseUrl: 'https://api.example.com/v1', mode: 'safe' },
     wp_api_key: 'sk-test-key-0000000000000000',
     wp_disclosure_ack: true,
   };

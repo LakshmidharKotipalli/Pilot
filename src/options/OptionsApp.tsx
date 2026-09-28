@@ -53,7 +53,7 @@ export default function OptionsApp() {
         apiBaseUrl: s.apiBaseUrl,
         modelId: s.modelId,
         maxSteps: s.maxSteps,
-        safeMode: s.safeMode,
+        mode: s.mode,
         dryRun: s.dryRun,
         debug: s.debug,
         blockedDomainPatterns: blocked,
@@ -142,16 +142,26 @@ export default function OptionsApp() {
 
       <section className="card" aria-labelledby="mode">
         <h2 id="mode">Mode</h2>
-        <label className="inline">
-          <input type="checkbox" checked={s.safeMode} onChange={(e) => set('safeMode', e.target.checked)} />
-          Safe mode (recommended): approve every click, text entry, selection and navigation
-        </label>
-        {!s.safeMode && (
+        <label htmlFor="mode-select">How much should WebPilot do on its own?</label>
+        <select id="mode-select" value={s.mode} onChange={(e) => set('mode', e.target.value as PublicSettings['mode'])}>
+          <option value="autonomous">Autonomous (default): asks only before serious actions</option>
+          <option value="assisted">Assisted: auto-runs only scrolling, expanding, tabs and reading</option>
+          <option value="safe">Safe: approve every click, text entry and selection</option>
+        </select>
+        {s.mode === 'autonomous' && (
+          <div className="notice small" role="alert">
+            <strong>Autonomous mode is on.</strong> Routine, low-risk steps (navigating the same site, searching, filling
+            ordinary fields, choosing options) run without asking. Anything that could change data or involve payment
+            (submitting, purchasing, sending, deleting, booking, account changes, new-origin navigation) waits for your
+            approval unless your prompt explicitly names that control, for example “click Add to cart”. Password, payment,
+            identity and MFA fields, file uploads, and uncertain targets always require approval.
+          </div>
+        )}
+        {s.mode === 'assisted' && (
           <div className="notice small" role="alert">
             <strong>Assisted mode is on.</strong> Only low-risk, reversible actions (scrolling, expanding sections, switching
-            tabs, focusing fields, reading visible text, same-page links) run without asking. Submitting, purchasing,
-            sending, deleting, login, account changes, downloads/uploads, new-origin navigation and sensitive fields always
-            require your confirmation. Uncertain actions are treated as high risk.
+            tabs, focusing fields, reading visible text, same-page links) run without asking. Everything else needs your
+            confirmation. Uncertain actions are treated as high risk.
           </div>
         )}
       </section>

@@ -167,3 +167,44 @@ describe('assessRisk', () => {
     expect(assessRisk({ action: ex, target: el({ sensitive: true }), pageUrl: PAGE, mode: 'assisted' }).risk).toBe('high');
   });
 });
+
+describe('autonomous mode', () => {
+  const auto = (action: AgentAction, target: ElementDescriptor | null, userGoal = '') =>
+    assessRisk({ action, target, pageUrl: PAGE, mode: 'autonomous', userGoal });
+
+  it('runs routine low-risk steps without asking, including typing and same-site links', () => {
+    expect(auto(type('wireless headphones'), el({ tag: 'input', inputType: 'search', name: 'Search' })).requiresConfirmation).toBe(false);
+    expect(auto(click, el({ tag: 'a', role: 'link', name: 'Contact', href: 'https://shop.example.com/contact' })).requiresConfirmation).toBe(false);
+    expect(auto({ type: 'select_option', targetId: 'el_1', value: 'red', reason: 'r' }, el({ tag: 'select', name: 'Colour' })).requiresConfirmation).toBe(false);
+  });
+
+  it('still asks before serious actions the prompt did not mention', () => {
+    const buy = el({ name: 'Add to cart', visibleText: 'Add to cart' });
+    expect(auto(click, buy, 'find headphones under $50')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(auto(click, el({ isSubmit: true, inForm: true, name: 'Go' }), 'fill the form')).toMatchObject({ requiresConfirmation: true });
+  });
+
+  it('proceeds without asking when the prompt explicitly names the control', () => {
+    const buy = el({ name: 'Add to cart', visibleText: 'Add to cart' });
+    const r = auto(click, buy, 'Search for headphones and click "Add to cart"');
+    expect(r.risk).toBe('high');
+    expect(r.requiresConfirmation).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/explicitly requested/i);
+  });
+
+  it('a partial or unrelated mention does not count', () => {
+    const buy = el({ name: 'Buy now', visibleText: 'Buy now' });
+    expect(auto(click, buy, 'I want to buy headphones').requiresConfirmation).toBe(true);
+  });
+
+  it('never waives hard stops, even if the prompt names them', () => {
+    const pw = el({ tag: 'input', inputType: 'password', sensitive: true, name: 'Password' });
+    expect(auto(type('x'), pw, 'type into Password').requiresConfirmation).toBe(true);
+    const file = el({ tag: 'input', inputType: 'file', name: 'Choose file' });
+    expect(auto(click, file, 'click Choose file').requiresConfirmation).toBe(true);
+    const card = el({ tag: 'input', inputType: 'text', name: 'Notes' });
+    expect(auto(type('4242 4242 4242 4242'), card, 'type 4242 4242 4242 4242 into Notes').requiresConfirmation).toBe(true);
+    expect(auto(click, null, 'click anything').requiresConfirmation).toBe(true);
+    expect(auto(click, el({ tag: 'a', name: 'Email us', href: 'mailto:a@b.co' }), 'click Email us').requiresConfirmation).toBe(true);
+  });
+});

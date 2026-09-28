@@ -165,7 +165,7 @@ export const RiskAssessmentSchema = z.object({
 });
 export type RiskAssessment = z.infer<typeof RiskAssessmentSchema>;
 
-export const ModeSchema = z.enum(['safe', 'assisted']);
+export const ModeSchema = z.enum(['safe', 'assisted', 'autonomous']);
 export type Mode = z.infer<typeof ModeSchema>;
 
 /* ------------------------------------------------------------------ */
@@ -176,7 +176,7 @@ export const SettingsSchema = z.object({
   apiBaseUrl: z.string().trim().url().default(DEFAULT_API_BASE_URL),
   modelId: z.string().trim().max(200).default(''),
   maxSteps: z.number().int().min(1).max(MAX_STEPS_CEILING).default(DEFAULT_MAX_STEPS),
-  safeMode: z.boolean().default(true),
+  mode: ModeSchema.default('autonomous'),
   dryRun: z.boolean().default(false),
   debug: z.boolean().default(false),
   allowedDomains: z.array(z.string().trim().toLowerCase().min(1).max(253)).default([]),
