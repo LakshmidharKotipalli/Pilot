@@ -124,6 +124,10 @@ function doClick(el: Element, label: string): ExecResult {
     return fail('COVERED', 'Another element is covering the target, so the click was not performed.');
   }
   const navigating = tag === 'a' && !!(el as HTMLAnchorElement).href && !/^#/.test(el.getAttribute('href') ?? '');
+  /* Links stay in this tab: a session never opens or moves to another tab. */
+  if (tag === 'a' && (el as HTMLAnchorElement).target && (el as HTMLAnchorElement).target !== '_self') {
+    (el as HTMLAnchorElement).target = '_self';
+  }
   (el as HTMLElement).click();
   return ok(`Clicked “${truncate(label, 60)}”.`, navigating ? { navigating: true } : {});
 }

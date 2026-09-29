@@ -1,12 +1,15 @@
-import { AgentOrchestrator } from './agentOrchestrator';
+import { DecisionCenter } from './decisions';
 import { setDebug } from './debug';
 import { registerMessageRouter } from './messageRouter';
+import { SessionManager } from './sessionManager';
 import { getSettings } from './settings';
 
-const orchestrator = new AgentOrchestrator();
+const sessions = new SessionManager();
+const decisions = new DecisionCenter(sessions);
 
 // Listeners must be registered synchronously at top level so a restarted worker receives events.
-registerMessageRouter(orchestrator);
+registerMessageRouter(sessions);
+decisions.register();
 
 // Toolbar click → open the side panel for that tab. Handling the click ourselves (instead of
 // openPanelOnActionClick) guarantees Chrome treats it as an `activeTab` invocation for this tab.
@@ -15,11 +18,12 @@ chrome.action.onClicked.addListener((tab) => {
   if (tab.id !== undefined) void chrome.sidePanel.open({ tabId: tab.id }).catch(() => undefined);
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => orchestrator.handleTabClosed(tabId));
+// Only the session on the closed tab stops; every other session keeps running.
+chrome.tabs.onRemoved.addListener((tabId) => sessions.handleTabClosed(tabId));
 
 // Rehydrate safe run state (status/counters only; never DOM references) and refresh settings.
 void (async () => {
-  await orchestrator.init();
+  await sessions.init();
   setDebug((await getSettings()).debug);
-  orchestrator.publish();
+  sessions.publish();
 })();

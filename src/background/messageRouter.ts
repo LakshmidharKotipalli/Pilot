@@ -7,7 +7,7 @@ import {
 } from '../shared/messages';
 import { redactText } from '../shared/redaction';
 import type { AgentAction } from '../shared/schemas';
-import type { AgentOrchestrator } from './agentOrchestrator';
+import type { SessionManager } from './sessionManager';
 import { appendLog, clearLog, getLog } from './activityLog';
 import { readLastError, recentDebug, setDebug } from './debug';
 import {
@@ -27,8 +27,8 @@ export function normalizeHost(raw: string): string {
   return h;
 }
 
-async function buildDiagnostics(orch: AgentOrchestrator) {
-  const s = await orch.getSnapshot();
+async function buildDiagnostics(mgr: SessionManager, tabId?: number) {
+  const s = await mgr.getSnapshot(tabId);
   const perms = await chrome.permissions.getAll();
   return {
     extension: 'WebPilot Agent',
@@ -37,7 +37,8 @@ async function buildDiagnostics(orch: AgentOrchestrator) {
     currentDomain: s.site.host,
     siteStatus: s.site.code,
     stateMachineStatus: s.status,
-    step: `${s.step}/${s.maxSteps}`,
+    step: s.step,
+    sessions: s.sessions.map((x) => ({ status: x.status, step: x.step, needsYou: x.needsYou })),
     mode: s.mode,
     dryRun: s.dryRun,
     modelIdConfigured: s.modelId.length > 0,
@@ -50,36 +51,44 @@ async function buildDiagnostics(orch: AgentOrchestrator) {
   };
 }
 
-async function handleUi(msg: UiMessage, orch: AgentOrchestrator): Promise<unknown> {
+async function handleUi(msg: UiMessage, mgr: SessionManager): Promise<unknown> {
   switch (msg.type) {
     case 'ui/run_prompt':
-      await orch.start(msg.prompt);
+      await mgr.start(msg.prompt, msg.tabId);
       return null;
     case 'ui/approve':
-      if (!orch.approve(msg.actionId)) throw new UserError('No matching action is waiting for approval.');
+      if (!mgr.approve(msg.sessionId, msg.actionId)) throw new UserError('No matching action is waiting for approval.');
       return null;
     case 'ui/reject':
-      if (!orch.reject(msg.actionId)) throw new UserError('No matching action is waiting for approval.');
+      if (!mgr.reject(msg.sessionId, msg.actionId)) throw new UserError('No matching action is waiting for approval.');
       return null;
     case 'ui/preview':
-      return orch.preview(msg.actionId);
+      return mgr.preview(msg.sessionId, msg.actionId);
+    case 'ui/continue':
+      if (!mgr.continueRun(msg.sessionId)) throw new UserError('That run is not waiting to continue.');
+      return null;
     case 'ui/stop':
-      orch.stop();
+      mgr.stop(msg.sessionId);
+      return null;
+    case 'ui/stop_all':
+      mgr.stopAll();
       return null;
     case 'ui/get_state':
-      return orch.getSnapshot();
+      return mgr.getSnapshot(msg.tabId);
+    case 'ui/get_decisions':
+      return mgr.decisions();
     case 'ui/get_settings':
       return getPublicSettings();
     case 'ui/save_settings': {
       await saveSettings(msg.settings);
       if (msg.apiKey && msg.apiKey.trim()) await setApiKey(msg.apiKey);
       setDebug((await getSettings()).debug);
-      orch.publish();
+      mgr.publish();
       return getPublicSettings();
     }
     case 'ui/clear_api_key':
       await clearApiKey();
-      orch.publish();
+      mgr.publish();
       return null;
     case 'ui/get_log':
       return getLog();
@@ -107,7 +116,7 @@ async function handleUi(msg: UiMessage, orch: AgentOrchestrator): Promise<unknow
         outcome: 'info',
         detail: null,
       });
-      orch.publish();
+      mgr.publish();
       return null;
     }
     case 'ui/remove_site': {
@@ -119,25 +128,25 @@ async function handleUi(msg: UiMessage, orch: AgentOrchestrator): Promise<unknow
       } catch {
         /* permission was never granted */
       }
-      orch.publish();
+      mgr.publish();
       return null;
     }
     case 'ui/pause_site':
       await updateDomainList('pausedDomains', normalizeHost(msg.host), msg.paused);
-      if (msg.paused) orch.stop('Paused on this site.');
-      orch.publish();
+      if (msg.paused) mgr.stopOnHost(normalizeHost(msg.host), 'Paused on this site.');
+      mgr.publish();
       return null;
     case 'ui/ack_disclosure':
       await acknowledgeDisclosure();
-      orch.publish();
+      mgr.publish();
       return null;
     case 'ui/get_diagnostics':
-      return buildDiagnostics(orch);
+      return buildDiagnostics(mgr, msg.tabId);
   }
 }
 
 /** Only this extension's own pages may command the worker; content scripts may only report staleness. */
-export function registerMessageRouter(orch: AgentOrchestrator): void {
+export function registerMessageRouter(mgr: SessionManager): void {
   chrome.runtime.onMessage.addListener((raw: unknown, sender, sendResponse: (r: UiResponse) => void) => {
     if (sender.id !== chrome.runtime.id) return false;
 
@@ -148,7 +157,7 @@ export function registerMessageRouter(orch: AgentOrchestrator): void {
         sendResponse({ ok: false, error: 'Rejected malformed message.' });
         return false;
       }
-      handleUi(parsed.data, orch).then(
+      handleUi(parsed.data, mgr).then(
         (data) => sendResponse({ ok: true, data }),
         (e: unknown) =>
           sendResponse({
@@ -161,7 +170,9 @@ export function registerMessageRouter(orch: AgentOrchestrator): void {
 
     if (sender.tab) {
       const parsed = ContentToBgMessageSchema.safeParse(raw);
-      if (parsed.success && parsed.data.type === 'content/stale') orch.markMapStale();
+      if (parsed.success && parsed.data.type === 'content/stale' && sender.tab.id !== undefined) {
+        mgr.markMapStale(sender.tab.id);
+      }
       return false;
     }
     return false;

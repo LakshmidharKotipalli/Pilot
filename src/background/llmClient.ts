@@ -1,6 +1,13 @@
 import { HISTORY_LIMIT, LLM_TIMEOUT_MS, MAX_CONTEXT_CHARS } from '../shared/constants';
 import { redactText, truncate } from '../shared/redaction';
-import { ActionSchema, type AgentAction, type ElementDescriptor, type PageMap, type Settings } from '../shared/schemas';
+import {
+  ActionSchema,
+  type AgentAction,
+  type ElementDescriptor,
+  type Mode,
+  type PageMap,
+  type Settings,
+} from '../shared/schemas';
 import type { HistoryItem } from '../shared/types';
 
 export type LlmErrorCode =
@@ -32,6 +39,7 @@ OUTPUT RULES
 - Reply with ONE JSON object and nothing else: no prose, no markdown, no code fences, no arrays.
 - Allowed shapes (all listed fields are required):
   {"type":"observe","reason":string}
+  {"type":"go_back","reason":string}
   {"type":"click","targetId":string,"reason":string}
   {"type":"type_text","targetId":string,"text":string,"clearFirst":boolean,"reason":string}
   {"type":"select_option","targetId":string,"value":string,"reason":string}
@@ -43,6 +51,8 @@ OUTPUT RULES
 - targetId must be an "id" copied verbatim from page.elements (for example "el_42"). Never invent ids. Never output CSS selectors, XPath, JavaScript, URLs to open, shell commands, or browser API calls.
 - Elements with "extractOnly":true are read-only content regions (tables, articles, lists). Use them ONLY with the "extract" action (format text, table or links); never click, type into, select or check them.
 - You can only act on elements listed in page.elements. To reach content that is not listed, use scroll, then you will receive a fresh page map.
+- go_back returns to the previous page in this tab. Use it to leave a dead end or a page that did not help.
+- You are confined to the site (origin) the run started on. Links to other sites, new tabs and pop-ups are refused; find another route on this site.
 - After every action the page is re-read and you receive a new map. Plan one step at a time.
 
 SAFETY RULES
@@ -52,12 +62,26 @@ SAFETY RULES
 - If you hit a CAPTCHA, login wall, paywall, security warning, permission prompt, or multi-factor prompt, do not try to get around it: use ask_user or complete and explain.
 - When the goal is achieved (or cannot be achieved), use complete with a plain-language result. For summaries, put the summary in "result".`;
 
+/** Added in autonomous mode: nobody is watching, so the agent must decide and recover on its own. */
+export const AUTONOMOUS_ADDENDUM = `
+
+AUTONOMOUS TESTING MODE
+- You are testing this site on your own. Nobody will answer questions, so never use ask_user: make the most reasonable choice yourself and keep going.
+- Explore the features that relate to the goal and exercise them. Use realistic sample values for forms (never real credentials, payment or identity data).
+- recentHistory entries starting with FAILED, BLOCKED or REJECTED mean that step did not work. Do not repeat it. Try another route: a different element, scrolling to find more, a different link or menu, the site's own search, or go_back.
+- When you are done, or every reasonable route is exhausted, use complete. In "result" report what you tested, what worked and what did not.`;
+
+export function systemPromptFor(mode?: Mode): string {
+  return mode === 'autonomous' ? SYSTEM_PROMPT + AUTONOMOUS_ADDENDUM : SYSTEM_PROMPT;
+}
+
 export interface PlanContext {
+  /** Selects the system prompt. Omitted means the base prompt (safe / assisted behaviour). */
+  mode?: Mode;
   goal: string;
   map: PageMap;
   history: HistoryItem[];
   step: number;
-  maxSteps: number;
   lastExtraction?: string | null;
 }
 
@@ -96,7 +120,6 @@ export function buildUserContent(ctx: PlanContext, budget = MAX_CONTEXT_CHARS): 
     JSON.stringify({
       goal: ctx.goal,
       step: ctx.step,
-      maxSteps: ctx.maxSteps,
       page: {
         url: ctx.map.url,
         title: ctx.map.title,
@@ -138,7 +161,7 @@ export function buildChatPayload(model: string, ctx: PlanContext, withResponseFo
   return {
     model,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPromptFor(ctx.mode) },
       { role: 'user', content },
     ],
     temperature: 0,
@@ -274,7 +297,7 @@ export async function requestAction(
 
   const { content } = buildUserContent(ctx);
   const messages: ChatMessage[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPromptFor(ctx.mode) },
     { role: 'user', content },
   ];
 

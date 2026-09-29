@@ -2,8 +2,6 @@ import { z } from 'zod';
 import {
   DEFAULT_API_BASE_URL,
   DEFAULT_BLOCKED_DOMAIN_PATTERNS,
-  DEFAULT_MAX_STEPS,
-  MAX_STEPS_CEILING,
   MAX_TYPE_TEXT_CHARS,
 } from './constants';
 
@@ -38,6 +36,8 @@ export const SetCheckedActionSchema = z
   .object({ type: z.literal('set_checked'), targetId: TargetIdSchema, checked: z.boolean(), reason })
   .strict();
 
+export const GoBackActionSchema = z.object({ type: z.literal('go_back'), reason }).strict();
+
 export const ScrollActionSchema = z
   .object({
     type: z.literal('scroll'),
@@ -67,6 +67,7 @@ export const AskUserActionSchema = z
 /** Every action the model may return. Exactly one object; arrays / extra keys are rejected. */
 export const ActionSchema = z.discriminatedUnion('type', [
   ObserveActionSchema,
+  GoBackActionSchema,
   ClickActionSchema,
   TypeTextActionSchema,
   SelectOptionActionSchema,
@@ -162,6 +163,8 @@ export const RiskAssessmentSchema = z.object({
   risk: z.enum(['low', 'high']),
   reasons: z.array(z.string()),
   requiresConfirmation: z.boolean(),
+  /** Autonomous mode only: a hard limit was hit, so the action is skipped instead of asking. */
+  blocked: z.boolean().default(false),
 });
 export type RiskAssessment = z.infer<typeof RiskAssessmentSchema>;
 
@@ -175,7 +178,6 @@ export type Mode = z.infer<typeof ModeSchema>;
 export const SettingsSchema = z.object({
   apiBaseUrl: z.string().trim().url().default(DEFAULT_API_BASE_URL),
   modelId: z.string().trim().max(200).default(''),
-  maxSteps: z.number().int().min(1).max(MAX_STEPS_CEILING).default(DEFAULT_MAX_STEPS),
   mode: ModeSchema.default('autonomous'),
   dryRun: z.boolean().default(false),
   debug: z.boolean().default(false),
@@ -199,6 +201,7 @@ export const RunStatusSchema = z.enum([
   'calling_model',
   'validating_action',
   'awaiting_confirmation',
+  'paused_loop',
   'executing',
   'observing_result',
   'completed',
@@ -256,12 +259,33 @@ export const LogEntrySchema = z.object({
 });
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 
+/** What a session is waiting on the user for. */
+export const DecisionKindSchema = z.enum(['approval', 'loop', 'question']);
+export type DecisionKind = z.infer<typeof DecisionKindSchema>;
+
+/** One row of the side panel's session list. Never contains page content. */
+export const SessionSummarySchema = z.object({
+  sessionId: z.string(),
+  tabId: z.number(),
+  host: z.string().nullable(),
+  prompt: z.string(),
+  status: RunStatusSchema,
+  step: z.number(),
+  needsYou: DecisionKindSchema.nullable(),
+});
+export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+
 export const PanelStateSchema = z.object({
+  /** The session this state describes, or null for a tab that has no session. */
+  sessionId: z.string().nullable(),
+  tabId: z.number().nullable(),
+  /** The origin this session is confined to, once it has started. */
+  scopeOrigin: z.string().nullable(),
+  sessions: z.array(SessionSummarySchema),
   status: RunStatusSchema,
   runId: z.string().nullable(),
   prompt: z.string(),
   step: z.number(),
-  maxSteps: z.number(),
   mode: ModeSchema,
   modelId: z.string(),
   dryRun: z.boolean(),
@@ -279,14 +303,29 @@ export const PanelStateSchema = z.object({
 });
 export type PanelState = z.infer<typeof PanelStateSchema>;
 
-/** Persisted (chrome.storage.session) subset of the run. Never contains DOM references or page content. */
+/** A pending decision as shown in the decision popup. Contains only what the user needs to decide. */
+export const DecisionViewSchema = z.object({
+  sessionId: z.string(),
+  tabId: z.number(),
+  kind: DecisionKindSchema,
+  host: z.string().nullable(),
+  prompt: z.string(),
+  status: RunStatusSchema,
+  proposal: ProposalSchema.nullable(),
+  pageChanged: z.boolean(),
+  question: z.string().nullable(),
+  loopSummary: z.string().nullable(),
+});
+export type DecisionView = z.infer<typeof DecisionViewSchema>;
+
+/** Persisted (chrome.storage.session) subset of one run. Never contains DOM references or page content. */
 export const PersistedRunSchema = z.object({
+  sessionId: z.string(),
   status: RunStatusSchema,
   runId: z.string().nullable(),
-  tabId: z.number().nullable(),
+  tabId: z.number(),
   prompt: z.string(),
   step: z.number(),
-  maxSteps: z.number(),
   lastError: z.string().nullable(),
 });
 export type PersistedRun = z.infer<typeof PersistedRunSchema>;

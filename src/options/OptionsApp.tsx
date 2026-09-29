@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { DEFAULT_BLOCKED_DOMAIN_PATTERNS, DEFAULT_API_BASE_URL, MAX_STEPS_CEILING } from '../shared/constants';
+import { DEFAULT_BLOCKED_DOMAIN_PATTERNS, DEFAULT_API_BASE_URL } from '../shared/constants';
 import { sendToBackground } from '../shared/messages';
 import { SettingsSchema } from '../shared/schemas';
 import type { PublicSettings } from '../shared/types';
@@ -52,7 +52,6 @@ export default function OptionsApp() {
       const candidate = {
         apiBaseUrl: s.apiBaseUrl,
         modelId: s.modelId,
-        maxSteps: s.maxSteps,
         mode: s.mode,
         dryRun: s.dryRun,
         debug: s.debug,
@@ -135,9 +134,6 @@ export default function OptionsApp() {
 
         <label htmlFor="model">Model ID</label>
         <input id="model" type="text" value={s.modelId} onChange={(e) => set('modelId', e.target.value)} placeholder="Model ID from your provider" />
-
-        <label htmlFor="steps">Maximum agent steps per run (1–{MAX_STEPS_CEILING})</label>
-        <input id="steps" type="number" min={1} max={MAX_STEPS_CEILING} value={s.maxSteps} onChange={(e) => set('maxSteps', Number(e.target.value))} />
       </section>
 
       <section className="card" aria-labelledby="mode">

@@ -9,7 +9,7 @@ const outDir = resolve(root, 'dist');
 
 /**
  * Three build targets, selected with `--mode`:
- *  - ui:         side panel + options page (React, HTML entries) and copies public/manifest.json
+ *  - ui:         side panel + options page + decision popup (React, HTML entries) and copies public/manifest.json
  *  - background: MV3 service worker (single ES module file)
  *  - content:    content script (single IIFE file: executeScript({files}) cannot load ES modules)
  */
@@ -59,6 +59,7 @@ export default defineConfig(({ mode }): UserConfig => {
         input: {
           sidepanel: resolve(src, 'sidepanel/index.html'),
           options: resolve(src, 'options/index.html'),
+          decision: resolve(src, 'decision/index.html'),
         },
       },
     },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ActionSchema, ExecutableActionSchema, SettingsSchema } from '../src/shared/schemas';
 import { ToContentMessageSchema, UiMessageSchema } from '../src/shared/messages';
-import { canTransition } from '../src/shared/stateMachine';
+import { canTransition, isActiveStatus } from '../src/shared/stateMachine';
 
 const valid = [
   { type: 'observe', reason: 'need info' },
@@ -68,6 +68,14 @@ describe('message schemas', () => {
     expect(UiMessageSchema.safeParse({ type: 'ui/eval', code: '1' }).success).toBe(false);
     expect(UiMessageSchema.safeParse({ type: 'ui/run_prompt', prompt: '   ' }).success).toBe(false);
     expect(UiMessageSchema.safeParse({ type: 'ui/run_prompt', prompt: 'find contact page' }).success).toBe(true);
+    for (const type of ['ui/approve', 'ui/reject', 'ui/preview']) {
+      expect(UiMessageSchema.safeParse({ type, actionId: 'a' }).success).toBe(false);
+      expect(UiMessageSchema.safeParse({ type, sessionId: 's', actionId: 'a' }).success).toBe(true);
+    }
+    expect(UiMessageSchema.safeParse({ type: 'ui/stop' }).success).toBe(false);
+    expect(UiMessageSchema.safeParse({ type: 'ui/stop', sessionId: 's' }).success).toBe(true);
+    expect(UiMessageSchema.safeParse({ type: 'ui/continue', sessionId: 's' }).success).toBe(true);
+    expect(UiMessageSchema.safeParse({ type: 'ui/stop_all' }).success).toBe(true);
   });
 
   it('only lets the worker send validated executable actions to the content script', () => {
@@ -89,9 +97,10 @@ describe('settings & state machine', () => {
     expect(s.dryRun).toBe(false);
   });
 
-  it('bounds maxSteps', () => {
-    expect(SettingsSchema.safeParse({ maxSteps: 0 }).success).toBe(false);
-    expect(SettingsSchema.safeParse({ maxSteps: 500 }).success).toBe(false);
+  it('has no step limit setting, and tolerates a stored one from an older version', () => {
+    const parsed = SettingsSchema.parse({ maxSteps: 8 });
+    expect('maxSteps' in parsed).toBe(false);
+    expect(SettingsSchema.safeParse({ maxSteps: 500 }).success).toBe(true);
   });
 
   it('enforces legal transitions', () => {
@@ -100,5 +109,9 @@ describe('settings & state machine', () => {
     expect(canTransition('calling_model', 'executing')).toBe(false); // must validate first
     expect(canTransition('validating_action', 'executing')).toBe(true);
     expect(canTransition('completed', 'executing')).toBe(false);
+    expect(canTransition('validating_action', 'paused_loop')).toBe(true);
+    expect(canTransition('paused_loop', 'validating_action')).toBe(true);
+    expect(canTransition('paused_loop', 'executing')).toBe(false);
+    expect(isActiveStatus('paused_loop')).toBe(true);
   });
 });

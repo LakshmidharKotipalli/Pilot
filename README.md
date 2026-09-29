@@ -3,7 +3,8 @@
 A Chrome (Manifest V3) side-panel assistant. You type an instruction; an OpenAI-compatible LLM plans **one**
 allowlisted action at a time; the extension validates it, classifies its risk **locally**, highlights the target,
 asks for your approval when policy requires, executes it inside the page DOM, re-reads the page, and repeats
-(bounded by a step limit).
+until it finishes, you stop it, or the loop guard notices it is going in circles. Several runs can be active
+at once, each on its own tab.
 
 Stack: TypeScript · React + Vite · Zod · Vitest · MV3 service worker · content script · Side Panel API.
 
@@ -81,7 +82,7 @@ Configure (Settings, opened with **⚙ Settings** in the panel or from the exten
    http only for localhost).
 2. **API key** – pasted once; stored in `chrome.storage.local`, never displayed again.
 3. **Model ID** – whatever your provider calls the model (nothing is hard-coded).
-4. **Maximum agent steps**, **Mode** (Autonomous by default), optional **Dry run** and **Debug**.
+4. **Mode** (Autonomous by default), optional **Dry run** and **Debug**.
 5. Click **Save settings** and accept Chrome’s prompt to let the extension talk to the API host (needed so the service
    worker’s `fetch` is not blocked by CORS).
 
@@ -102,12 +103,30 @@ npm run typecheck   # tsc --noEmit
 |---|---|---|---|
 | click / type / select / check | always needs your approval | needs approval unless on the low-risk allowlist | runs on its own when low risk (search, ordinary fields, same-site links, options) |
 | scroll, read-only extract | run without approval (still previewed and logged) | same | same |
-| serious actions (form submit · commerce/payment · send/post · delete/cancel · booking · account changes · downloads · permissions · new-origin navigation) | approval | approval | approval, **unless your prompt explicitly names that control** (e.g. “click Add to cart”) |
-| hard stops (password/payment/identity/MFA fields · card- or SSN-like text · file uploads · non-http links · uncertain targets) | approval | approval | approval, always, even if the prompt names them |
+| serious actions (form submit · commerce/payment · send/post · delete/cancel · booking · account changes · downloads · permissions) | approval | approval | **runs on its own** (still shown as high risk in the log) |
+| hard stops (password/payment/identity/MFA fields · card- or SSN-like text · file uploads · non-http links · uncertain targets) | approval | approval | **skipped, never asked about**: the agent is told it was blocked and tries another route |
+| leaving the starting site (link to another origin) | blocked | blocked | blocked |
 
-In Autonomous mode the check is local and model-independent: a serious action skips approval only when the control's
-label appears as a whole phrase in the prompt you typed. A vague mention (“buy headphones”) does not authorize “Buy now”.
-Blocked-domain rules still apply in every mode.
+In Autonomous mode nobody is asked anything: the local, model-independent check either lets a step run or skips it
+as a hard stop, and the model is told which so it can choose differently. The model is also told not to use `ask_user`
+(if it does, it is told to decide for itself). Blocked-domain rules still apply in every mode.
+
+### Staying on one site
+A run is confined to the **origin** (scheme + host + port) of the page it started on, in every mode. Links to other
+origins and non-web links are never followed (their `target=_blank` is also forced to this tab, so no new tab opens).
+If a form submit, redirect or script still moves the tab off the site, the run goes back and carries on; if going
+back does not work it stops with a clear message. Scripted `window.open` pop-ups cannot be prevented by the extension.
+The agent also has a `go_back` action to leave dead ends.
+
+### When something does not work
+A step that fails (unknown element, covered/disabled/stale target, blocked by policy, off-site link, unusable model
+reply) is **not fatal**: it is logged, reported back to the model as `FAILED`/`BLOCKED` with “try a different
+approach”, and the run continues. Only 6 failures in a row end the run (any action that succeeds resets the count);
+the loop guard still catches repeats. Missing/invalid API keys, blocked or closed tabs and Stop remain immediate.
+
+### Activity log
+One row per step: it appears as `proposed` and then changes in place to `approved`, `executed`, `auto executed`,
+`failed` or `rejected`, instead of adding a second row for each stage.
 
 In Safe and Assisted modes typing is never auto-executed; in all modes the exact literal text is shown in the preview. The model’s own opinion of risk
 is not part of the protocol at all: `shared/risk.ts` classifies from the target’s tag/type/role/labels/autocomplete,
@@ -121,6 +140,7 @@ form membership, link destination/origin, typed text, and nearby headings.
 | `scripting` | `chrome.scripting.executeScript({files:['content.js']})` – programmatic, on-demand injection. There are **no** static content scripts. |
 | `storage` | Settings, API key, activity log (`storage.local`) and non-sensitive run state (`storage.session`). |
 | `sidePanel` | The main UI. |
+| `notifications` | Tells you when a run needs a decision (approval, loop check, question) while the side panel is closed or you are on another site, and when a run finishes or fails. Notifications show only the kind of action and the label of its target, never typed text or page content. High-risk actions cannot be approved from a notification; they open the review window. |
 | `optional_host_permissions` (`http://*/*`, `https://*/*`) | **Optional, requested per host at runtime**: (a) when you click “Allow this site”, for that host only, so the allowlist keeps working after navigation/reload; (b) for your LLM API host, so the service worker can call it. Nothing is granted at install. |
 
 Not requested: `debugger`, `nativeMessaging`, `downloads`, `history`, `tabs`, `<all_urls>`, accessibility features.
@@ -179,7 +199,7 @@ password input, and some JS that can remove/replace elements.
 | Secret exfiltration to the provider | Sensitive fields never read; card/SSN/secret redaction; blocked domains; per-site allowlist; user disclosure; dry-run inspection. |
 | Malicious web page talking to the extension | Content script accepts messages only from the extension’s own worker (`sender.id`, no `sender.tab`) and Zod-validates them; worker accepts commands only from extension pages. |
 | Overlay/clickjacking of the target | Covered-target check (`elementFromPoint`) before click; overlay is `pointer-events:none` in a closed shadow root. |
-| Runaway agent / cost | Step limit, request timeout, Stop button, AbortController, keep-alive only while running. |
+| Runaway agent / cost | No step limit, so a loop guard instead: if the same action on the same target and page state repeats 4 times within the last 8 steps, the run pauses and asks you to continue or stop. Also: at most 5 concurrent sessions (one per tab), request timeout, Stop / Stop all, AbortController, one keep-alive only while a session is active. |
 | Key theft from browser profile | **Not fully mitigated** – see below. |
 
 ## Remaining limitations
@@ -206,3 +226,18 @@ password input, and some JS that can remove/replace elements.
   to `#hash` links on the current path.
 * Verified here: unit tests (jsdom), type-check and production build. The extension itself has not been exercised in a
   live Chrome session from this environment — run the QA checklist above.
+
+## Sessions, loops and decisions
+
+* **Sessions.** Each run is a session bound to the tab it started on. It reads, highlights and acts on that tab even
+  when you are looking at another one, and it never brings a tab to the front. A tab has one active session; different
+  tabs run in parallel (up to 5 at once). Closing a tab stops only its session. The side panel lists all sessions, marks
+  the ones that need you, and has **Stop all**.
+* **No step limit.** A run ends when the model finishes, you stop it, or something fails. The loop guard hashes each
+  step (action, target, page state); 4 identical steps in the last 8 pauses the run until you choose **Continue anyway**
+  or **Stop**.
+* **Decisions.** Approvals, loop checks and `ask_user` questions appear in the side panel when it is open on that tab.
+  Otherwise one review window (shared by all sessions) opens, the toolbar badge shows how many are waiting, and a
+  system notification announces the new one. Low-risk approvals can be approved or rejected from the notification;
+  high-risk ones must be approved in the review window.
+* Chrome throttles background tabs, so a run on a tab you are not looking at may be slower to settle.

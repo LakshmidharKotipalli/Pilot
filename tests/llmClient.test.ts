@@ -43,7 +43,7 @@ function ctx(n = 3): PlanContext {
     elements: Array.from({ length: n }, (_, i) => element(i + 1)),
     truncated: false,
   };
-  return { goal: 'find contact', map, history: [], step: 1, maxSteps: 5 };
+  return { goal: 'find contact', map, history: [], step: 1 };
 }
 
 const deps = (fetchImpl: typeof fetch) => ({

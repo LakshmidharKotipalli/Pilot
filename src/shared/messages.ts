@@ -9,12 +9,20 @@ import {
 
 /* Side panel / options page -> service worker */
 export const UiMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('ui/run_prompt'), prompt: z.string().trim().min(1).max(2000) }),
-  z.object({ type: z.literal('ui/approve'), actionId: z.string() }),
-  z.object({ type: z.literal('ui/reject'), actionId: z.string() }),
-  z.object({ type: z.literal('ui/preview'), actionId: z.string() }),
-  z.object({ type: z.literal('ui/stop') }),
-  z.object({ type: z.literal('ui/get_state') }),
+  z.object({
+    type: z.literal('ui/run_prompt'),
+    prompt: z.string().trim().min(1).max(2000),
+    /** The tab to run on. Pages that know their own tab must send it; the worker never guesses "active". */
+    tabId: z.number().int().optional(),
+  }),
+  z.object({ type: z.literal('ui/approve'), sessionId: z.string(), actionId: z.string() }),
+  z.object({ type: z.literal('ui/reject'), sessionId: z.string(), actionId: z.string() }),
+  z.object({ type: z.literal('ui/preview'), sessionId: z.string(), actionId: z.string() }),
+  z.object({ type: z.literal('ui/continue'), sessionId: z.string() }),
+  z.object({ type: z.literal('ui/stop'), sessionId: z.string() }),
+  z.object({ type: z.literal('ui/stop_all') }),
+  z.object({ type: z.literal('ui/get_state'), tabId: z.number().int().optional() }),
+  z.object({ type: z.literal('ui/get_decisions') }),
   z.object({ type: z.literal('ui/get_settings') }),
   z.object({
     type: z.literal('ui/save_settings'),
@@ -28,7 +36,7 @@ export const UiMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ui/remove_site'), host: z.string().min(1).max(253) }),
   z.object({ type: z.literal('ui/pause_site'), host: z.string().min(1).max(253), paused: z.boolean() }),
   z.object({ type: z.literal('ui/ack_disclosure') }),
-  z.object({ type: z.literal('ui/get_diagnostics') }),
+  z.object({ type: z.literal('ui/get_diagnostics'), tabId: z.number().int().optional() }),
 ]);
 export type UiMessage = z.infer<typeof UiMessageSchema>;
 
@@ -63,6 +71,8 @@ export type ContentToBgMessage = z.infer<typeof ContentToBgMessageSchema>;
 export const BgToUiMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bg/state'), state: PanelStateSchema }),
   z.object({ type: z.literal('bg/log'), entry: LogEntrySchema }),
+  /** Something changed that is not one session's state (settings, a closed tab): re-read your state. */
+  z.object({ type: z.literal('bg/refresh') }),
 ]);
 export type BgToUiMessage = z.infer<typeof BgToUiMessageSchema>;
 

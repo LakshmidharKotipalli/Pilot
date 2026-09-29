@@ -1,8 +1,6 @@
 export const EXTENSION_NAME = 'WebPilot Agent';
 
 export const DEFAULT_API_BASE_URL = 'https://opencode.ai/zen/v1';
-export const DEFAULT_MAX_STEPS = 8;
-export const MAX_STEPS_CEILING = 25;
 
 // Page-map / payload limits
 export const MAX_ELEMENTS = 150;
@@ -31,6 +29,14 @@ export const HISTORY_LIMIT = 6;
 export const KEEPALIVE_MS = 20_000;
 export const SETTLE_MS = 500;
 export const AUTO_PREVIEW_MS = 800;
+// Concurrency / loop detection
+export const MAX_CONCURRENT_SESSIONS = 5;
+export const LOOP_WINDOW = 8;
+export const LOOP_REPEATS = 4;
+/** Recoverable failures in a row (bad target, blocked, failed action...) before the run gives up. */
+export const MAX_CONSECUTIVE_FAILURES = 6;
+/** Name of the port a side panel keeps open while it is alive. */
+export const PANEL_PORT = 'webpilot-panel';
 export const NAVIGATION_WAIT_MS = 10_000;
 
 export const STORAGE_KEYS = {
@@ -38,7 +44,7 @@ export const STORAGE_KEYS = {
   apiKey: 'wp_api_key',
   log: 'wp_activity_log',
   disclosure: 'wp_disclosure_ack',
-  run: 'wp_run_state',
+  runs: 'wp_run_states',
   lastError: 'wp_last_error',
 } as const;
 

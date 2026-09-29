@@ -140,21 +140,25 @@ export function assessRisk({ action, target, pageUrl, mode, userGoal }: RiskInpu
     if (mode === 'safe') {
       requiresConfirmation = risk === 'high' || isMutating(action);
     } else if (mode === 'autonomous') {
-      requiresConfirmation = hard.length > 0 || (soft.length > 0 && !isExplicitlyRequested(target, userGoal));
-      if (risk === 'high' && !requiresConfirmation) reasons = [...high, 'Explicitly requested in your prompt'];
+      requiresConfirmation = false;
+      if (hard.length > 0) reasons = [...hard, 'Skipped: autonomous mode never does this'];
+      else if (soft.length > 0 && isExplicitlyRequested(target, userGoal)) reasons = [...high, 'Explicitly requested in your prompt'];
     } else {
       requiresConfirmation = risk === 'high' || !isAutoEligible(action, target, pageUrl);
     }
-    return { risk, reasons, requiresConfirmation };
+    /* Autonomous mode never asks: soft reasons just run, hard limits are skipped and another route is tried. */
+    const blocked = mode === 'autonomous' && hard.length > 0;
+    return { risk, reasons, requiresConfirmation, blocked };
   };
 
   switch (action.type) {
     case 'observe':
+    case 'go_back':
     case 'complete':
     case 'ask_user':
-      return { risk: 'low', reasons: ['No page interaction'], requiresConfirmation: false };
+      return { risk: 'low', reasons: ['No page interaction'], requiresConfirmation: false, blocked: false };
     case 'scroll':
-      return { risk: 'low', reasons: ['Scrolling is reversible and changes no page data'], requiresConfirmation: false };
+      return { risk: 'low', reasons: ['Scrolling is reversible and changes no page data'], requiresConfirmation: false, blocked: false };
     default:
       break;
   }

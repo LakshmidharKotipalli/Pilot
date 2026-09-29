@@ -45,6 +45,33 @@ export async function appendLog(
   return full;
 }
 
+/**
+ * Create or update one entry by id. A step is one row whose outcome advances in place
+ * (proposed, approved, executed...) instead of a new row per stage. The original timestamp is kept.
+ */
+export async function upsertLog(
+  entry: Omit<LogEntry, 'ts'> & Partial<Pick<LogEntry, 'ts'>>,
+): Promise<LogEntry> {
+  const clean = {
+    prompt: entry.prompt ? truncate(redactText(entry.prompt), 500) : null,
+    actionSummary: truncate(redactText(entry.actionSummary), 400),
+    target: entry.target ? truncate(redactText(entry.target), 200) : null,
+    detail: entry.detail ? truncate(redactText(entry.detail), 500) : null,
+  };
+  let saved: LogEntry | null = null;
+  writeChain = writeChain.then(async () => {
+    const list = await load();
+    const i = list.findIndex((e) => e.id === entry.id);
+    saved = { ...entry, ...clean, ts: i >= 0 ? list[i]!.ts : (entry.ts ?? Date.now()) };
+    if (i >= 0) list[i] = saved;
+    else list.push(saved);
+    if (list.length > LOG_LIMIT) list.splice(0, list.length - LOG_LIMIT);
+    await chrome.storage.local.set({ [STORAGE_KEYS.log]: list });
+  });
+  await writeChain;
+  return saved!;
+}
+
 export async function clearLog(): Promise<void> {
   cache = [];
   writeChain = writeChain.then(() => chrome.storage.local.set({ [STORAGE_KEYS.log]: [] }));

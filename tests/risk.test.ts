@@ -178,10 +178,10 @@ describe('autonomous mode', () => {
     expect(auto({ type: 'select_option', targetId: 'el_1', value: 'red', reason: 'r' }, el({ tag: 'select', name: 'Colour' })).requiresConfirmation).toBe(false);
   });
 
-  it('still asks before serious actions the prompt did not mention', () => {
+  it('decides alone on serious actions: never asks, still labels them high risk', () => {
     const buy = el({ name: 'Add to cart', visibleText: 'Add to cart' });
-    expect(auto(click, buy, 'find headphones under $50')).toMatchObject({ risk: 'high', requiresConfirmation: true });
-    expect(auto(click, el({ isSubmit: true, inForm: true, name: 'Go' }), 'fill the form')).toMatchObject({ requiresConfirmation: true });
+    expect(auto(click, buy, 'find headphones under $50')).toMatchObject({ risk: 'high', requiresConfirmation: false, blocked: false });
+    expect(auto(click, el({ isSubmit: true, inForm: true, name: 'Go' }), 'fill the form')).toMatchObject({ requiresConfirmation: false, blocked: false });
   });
 
   it('proceeds without asking when the prompt explicitly names the control', () => {
@@ -192,19 +192,29 @@ describe('autonomous mode', () => {
     expect(r.reasons.join(' ')).toMatch(/explicitly requested/i);
   });
 
-  it('a partial or unrelated mention does not count', () => {
+  it('a partial mention is still allowed, but not credited as an explicit request', () => {
     const buy = el({ name: 'Buy now', visibleText: 'Buy now' });
-    expect(auto(click, buy, 'I want to buy headphones').requiresConfirmation).toBe(true);
+    const r = auto(click, buy, 'I want to buy headphones');
+    expect(r.requiresConfirmation).toBe(false);
+    expect(r.reasons.join(' ')).not.toMatch(/explicitly requested/i);
   });
 
-  it('never waives hard stops, even if the prompt names them', () => {
+  it('never waives hard stops: they are blocked (skipped), not asked about, even if the prompt names them', () => {
+    const blocked = (r: ReturnType<typeof auto>) => expect(r).toMatchObject({ blocked: true, requiresConfirmation: false });
     const pw = el({ tag: 'input', inputType: 'password', sensitive: true, name: 'Password' });
-    expect(auto(type('x'), pw, 'type into Password').requiresConfirmation).toBe(true);
+    blocked(auto(type('x'), pw, 'type into Password'));
     const file = el({ tag: 'input', inputType: 'file', name: 'Choose file' });
-    expect(auto(click, file, 'click Choose file').requiresConfirmation).toBe(true);
+    blocked(auto(click, file, 'click Choose file'));
     const card = el({ tag: 'input', inputType: 'text', name: 'Notes' });
-    expect(auto(type('4242 4242 4242 4242'), card, 'type 4242 4242 4242 4242 into Notes').requiresConfirmation).toBe(true);
-    expect(auto(click, null, 'click anything').requiresConfirmation).toBe(true);
-    expect(auto(click, el({ tag: 'a', name: 'Email us', href: 'mailto:a@b.co' }), 'click Email us').requiresConfirmation).toBe(true);
+    blocked(auto(type('4242 4242 4242 4242'), card, 'type 4242 4242 4242 4242 into Notes'));
+    blocked(auto(click, null, 'click anything'));
+    blocked(auto(click, el({ tag: 'a', name: 'Email us', href: 'mailto:a@b.co' }), 'click Email us'));
+  });
+
+  it('safe and assisted modes never set blocked', () => {
+    const pw = el({ tag: 'input', inputType: 'password', sensitive: true, name: 'Password' });
+    for (const mode of ['safe', 'assisted'] as const) {
+      expect(assessRisk({ action: type('x'), target: pw, pageUrl: PAGE, mode })).toMatchObject({ blocked: false, requiresConfirmation: true });
+    }
   });
 });

@@ -4,7 +4,7 @@ import type { AgentAction, ElementDescriptor, Mode, RiskAssessment } from '../sh
 
 export interface PolicyDecision {
   assessment: RiskAssessment;
-  decision: 'auto' | 'confirm';
+  decision: 'auto' | 'confirm' | 'block';
 }
 
 /**
@@ -19,6 +19,7 @@ export function decide(
   userGoal?: string,
 ): PolicyDecision {
   const assessment = assessRisk({ action, target, pageUrl, mode, userGoal });
+  if (assessment.blocked) return { assessment, decision: 'block' };
   return { assessment, decision: assessment.requiresConfirmation ? 'confirm' : 'auto' };
 }
 
@@ -28,6 +29,8 @@ export function summarizeAction(action: AgentAction, target?: ElementDescriptor 
   switch (action.type) {
     case 'observe':
       return 'Re-read the page';
+    case 'go_back':
+      return 'Go back to the previous page';
     case 'click':
       return `Click ${t}`;
     case 'type_text':
