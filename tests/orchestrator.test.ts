@@ -47,6 +47,10 @@ interface Harness {
   tabUrl: Record<number, string>;
   goBacks: number;
   bodies: string[];
+  /** The next N highlights fail as STALE_TARGET (the page updated after the preview). */
+  staleHighlights: number;
+  /** The next N content-script calls throw (e.g. the page was navigating). */
+  throwOnCall: number;
 }
 let h: Harness;
 let store: Record<string, unknown>;
@@ -97,6 +101,10 @@ function installChrome() {
             return { ok: true, map };
           }
           case 'cs/execute':
+            if (h.throwOnCall > 0) {
+              h.throwOnCall--;
+              throw new Error('Frame with ID 0 was removed.');
+            }
             if (h.execFailures > 0) {
               h.execFailures--;
               return { ok: false, code: 'COVERED', message: 'Another element is covering the target.' };
@@ -104,6 +112,10 @@ function installChrome() {
             h.executed.push({ tabId: id, action: msg.action });
             return { ok: true, message: 'Clicked “Next page”.' };
           case 'cs/highlight':
+            if (h.staleHighlights > 0) {
+              h.staleHighlights--;
+              return { ok: false, code: 'STALE_TARGET', message: 'The element changed since it was previewed (the page updated), so the action was cancelled.' };
+            }
             h.highlights.push(id);
             return { ok: true };
           default:
@@ -128,7 +140,7 @@ const CLICK = '{"type":"click","targetId":"el_1","reason":"go to the next page"}
 const DONE = '{"type":"complete","result":"Reached the next page"}';
 
 beforeEach(() => {
-  h = { executed: [], collectDelays: [], script: {}, fetchCalls: 0, changingPage: false, collects: {}, highlights: [], closed: new Set(), elements: [button(1, 'Next page')], execFailures: 0, tabUrl: {}, goBacks: 0, bodies: [] };
+  h = { executed: [], collectDelays: [], script: {}, fetchCalls: 0, changingPage: false, collects: {}, highlights: [], closed: new Set(), elements: [button(1, 'Next page')], execFailures: 0, tabUrl: {}, goBacks: 0, bodies: [], staleHighlights: 0, throwOnCall: 0 };
   installChrome();
   vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
     h.fetchCalls++;
@@ -514,6 +526,62 @@ describe('SessionManager', () => {
       expect(h.executed).toHaveLength(1);
       expect(h.bodies[1]).toMatch(/FAILED: COVERED/);
       expect(h.bodies[1]).toMatch(/Try a different approach/);
+    });
+
+    it('a stale preview (the page updated) is not fatal: it re-reads the page and tries again', async () => {
+      setMode('autonomous');
+      h.staleHighlights = 1;
+      h.script = { 'stale task': [CLICK, CLICK, DONE] };
+      const m = new SessionManager();
+      await m.start('stale task', ACTIVE_TAB);
+      await untilStatus(m, ACTIVE_TAB, 'completed');
+      expect(h.executed).toHaveLength(1);
+      expect(h.bodies[1]).toMatch(/FAILED: The element changed since it was previewed/);
+      const runId = (await snap(m)).runId;
+      const rows = (await getLog()).filter((e) => e.runId === runId);
+      expect(rows.filter((e) => e.outcome === 'failed')).toHaveLength(1); // no extra "Run failed" row
+      expect(rows.some((e) => e.actionSummary === 'Run failed')).toBe(false);
+    });
+
+    it('the same recovery applies in safe mode: the new attempt asks for approval again', async () => {
+      h.staleHighlights = 1;
+      h.script = { 'stale task': [CLICK, CLICK, DONE] };
+      const m = new SessionManager();
+      await m.start('stale task', ACTIVE_TAB);
+      await untilStatus(m, ACTIVE_TAB, 'awaiting_confirmation');
+      const s = await snap(m);
+      expect(s.step).toBe(2);
+      expect(m.approve(s.sessionId!, s.proposal!.actionId)).toBe(true);
+      await untilStatus(m, ACTIVE_TAB, 'completed');
+    });
+
+    it('an error thrown mid-step (page navigating, script unreachable) is recovered from too', async () => {
+      setMode('autonomous');
+      h.throwOnCall = 1;
+      h.script = { 'nav task': [CLICK, CLICK, DONE] };
+      const m = new SessionManager();
+      await m.start('nav task', ACTIVE_TAB);
+      await untilStatus(m, ACTIVE_TAB, 'completed');
+      expect(h.executed).toHaveLength(1);
+      expect(h.bodies[1]).toMatch(/FAILED: Frame with ID 0 was removed/);
+    });
+
+    it('but a tab that no longer exists still ends the run', async () => {
+      setMode('autonomous');
+      const chromeFake = (globalThis as unknown as { chrome: { tabs: { sendMessage: (id: number, msg: { type: string }) => Promise<unknown> } } }).chrome;
+      const original = chromeFake.tabs.sendMessage;
+      chromeFake.tabs.sendMessage = async (id, msg) => {
+        if (msg.type === 'cs/execute') {
+          h.closed.add(id);
+          throw new Error('No tab with id');
+        }
+        return original(id, msg);
+      };
+      h.script = { 'gone task': [CLICK, CLICK, CLICK] };
+      const m = new SessionManager();
+      await m.start('gone task', ACTIVE_TAB);
+      await untilStatus(m, ACTIVE_TAB, 'error');
+      expect((await snap(m)).lastError).toMatch(/tab was closed/i);
     });
 
     it('gives up only after 6 failures in a row, and says why', async () => {

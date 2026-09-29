@@ -68,6 +68,7 @@ export const AUTONOMOUS_ADDENDUM = `
 AUTONOMOUS TESTING MODE
 - You are testing this site on your own. Nobody will answer questions, so never use ask_user: make the most reasonable choice yourself and keep going.
 - Explore the features that relate to the goal and exercise them. Use realistic sample values for forms (never real credentials, payment or identity data).
+- A page can change between your plan and the action. If a step fails for any reason, re-read the new page map and choose again from what is there now.
 - recentHistory entries starting with FAILED, BLOCKED or REJECTED mean that step did not work. Do not repeat it. Try another route: a different element, scrolling to find more, a different link or menu, the site's own search, or go_back.
 - When you are done, or every reasonable route is exhausted, use complete. In "result" report what you tested, what worked and what did not.`;
 

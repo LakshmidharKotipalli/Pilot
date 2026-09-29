@@ -535,271 +535,291 @@ export class Session {
       // Steps that merely fail are fed back to the model so it tries another way; MAX_CONSECUTIVE_FAILURES
       // in a row ends the run, and the loop guard catches an agent going in circles.
       for (;;) {
-        this.assertCurrent(ctx);
-        this.step++;
-        this.setStatus(ctx, 'collecting_page_context', 'Reading the page…');
-
-        /* Scope first: a page that left the site is sent back before the allow-list judges it. */
-        if (!(await this.ensureInScope(ctx, tabId))) return;
-        const blocked = await this.assertTabStillAllowed(tabId, settings);
-        this.assertCurrent(ctx);
-        if (blocked) {
-          await this.log(ctx, { actionType: 'run', actionSummary: 'Blocked page', outcome: 'blocked', detail: blocked });
-          return this.fail(ctx, blocked);
-        }
-
-        let map = await this.collect(tabId);
-        this.assertCurrent(ctx);
-
-        const planCtx: PlanContext = {
-          mode,
-          goal,
-          map,
-          history: this.history,
-          step: this.step,
-          lastExtraction: this.lastExtraction,
-        };
-
-        if (settings.dryRun) {
-          // Dry run: build the exact request, show it (no secrets exist in the body), send nothing.
-          const payload = buildChatPayload(settings.modelId || '<model-id>', planCtx);
-          this.dryRunPayload = JSON.stringify(redactForLog(payload), null, 2);
-          this.finalResult = 'Dry run: the request below was built but NOT sent, and no action was executed.';
-          this.setStatus(ctx, 'calling_model', 'Building request (dry run)…');
-          this.setStatus(ctx, 'completed', 'Dry run complete');
-          await this.log(ctx, { actionType: 'run', actionSummary: 'Dry run', outcome: 'completed', detail: 'No request sent' });
-          return;
-        }
-
-        this.setStatus(ctx, 'calling_model', 'Asking the model for the next step…');
-        let plan;
         try {
-          plan = await requestAction({ settings, apiKey, signal: ctx.controller.signal }, planCtx);
-        } catch (e) {
-          if (e instanceof LlmError) {
-            if (e.code === 'aborted') throw new RunStopped();
-            if (e.code === 'invalid_output' || e.code === 'timeout' || e.code === 'empty') {
-              this.assertCurrent(ctx);
-              this.setStatus(ctx, 'validating_action', 'The model reply was unusable; asking again…');
-              if (!(await this.recover(ctx, { actionType: 'model', actionSummary: 'The model’s reply could not be used' }, 'failed', e.message))) return;
+          this.assertCurrent(ctx);
+          this.step++;
+          this.setStatus(ctx, 'collecting_page_context', 'Reading the page…');
+
+          /* Scope first: a page that left the site is sent back before the allow-list judges it. */
+          if (!(await this.ensureInScope(ctx, tabId))) return;
+          const blocked = await this.assertTabStillAllowed(tabId, settings);
+          this.assertCurrent(ctx);
+          if (blocked) {
+            await this.log(ctx, { actionType: 'run', actionSummary: 'Blocked page', outcome: 'blocked', detail: blocked });
+            return this.fail(ctx, blocked);
+          }
+
+          let map = await this.collect(tabId);
+          this.assertCurrent(ctx);
+
+          const planCtx: PlanContext = {
+            mode,
+            goal,
+            map,
+            history: this.history,
+            step: this.step,
+            lastExtraction: this.lastExtraction,
+          };
+
+          if (settings.dryRun) {
+            // Dry run: build the exact request, show it (no secrets exist in the body), send nothing.
+            const payload = buildChatPayload(settings.modelId || '<model-id>', planCtx);
+            this.dryRunPayload = JSON.stringify(redactForLog(payload), null, 2);
+            this.finalResult = 'Dry run: the request below was built but NOT sent, and no action was executed.';
+            this.setStatus(ctx, 'calling_model', 'Building request (dry run)…');
+            this.setStatus(ctx, 'completed', 'Dry run complete');
+            await this.log(ctx, { actionType: 'run', actionSummary: 'Dry run', outcome: 'completed', detail: 'No request sent' });
+            return;
+          }
+
+          this.setStatus(ctx, 'calling_model', 'Asking the model for the next step…');
+          let plan;
+          try {
+            plan = await requestAction({ settings, apiKey, signal: ctx.controller.signal }, planCtx);
+          } catch (e) {
+            if (e instanceof LlmError) {
+              if (e.code === 'aborted') throw new RunStopped();
+              if (e.code === 'invalid_output' || e.code === 'timeout' || e.code === 'empty') {
+                this.assertCurrent(ctx);
+                this.setStatus(ctx, 'validating_action', 'The model reply was unusable; asking again…');
+                if (!(await this.recover(ctx, { actionType: 'model', actionSummary: 'The model’s reply could not be used' }, 'failed', e.message))) return;
+                continue;
+              }
+              return this.fail(ctx, e.message);
+            }
+            throw e;
+          }
+          this.assertCurrent(ctx);
+
+          this.setStatus(ctx, 'validating_action', 'Checking the proposed action…');
+          const action = plan.action;
+          debugLog('action_validated', { type: action.type, repaired: plan.repaired });
+
+          if (action.type === 'complete') {
+            this.finalResult = redactText(action.result);
+            await this.log(ctx, { actionType: 'complete', actionSummary: 'Finished', outcome: 'completed', detail: this.finalResult });
+            this.setStatus(ctx, 'completed', 'Done');
+            return;
+          }
+          if (action.type === 'ask_user') {
+            if (mode === 'autonomous') {
+              // Nobody is there to answer: tell the model to decide, and only end the run if it keeps asking.
+              this.failures++;
+              this.history.push({ step: this.step, action: 'ask_user', outcome: 'REJECTED: nobody can answer. Decide yourself and continue' });
+              await this.log(ctx, { actionType: 'ask_user', actionSummary: 'Model asked a question; told to decide itself', outcome: 'info', detail: redactText(action.question) });
+              if (this.failures >= MAX_CONSECUTIVE_FAILURES) {
+                this.finalResult = redactText(`Stopped without finishing. Open question: ${action.question}`);
+                this.setStatus(ctx, 'completed', 'Done');
+                return;
+              }
               continue;
             }
-            return this.fail(ctx, e.message);
+            this.question = redactText(action.question);
+            this.lastQuestion = { question: this.question, goal: this.baseGoal };
+            await this.log(ctx, { actionType: 'ask_user', actionSummary: 'Asked a question', outcome: 'info', detail: this.question });
+            this.setStatus(ctx, 'completed', 'The assistant needs more information from you.');
+            return;
           }
-          throw e;
-        }
-        this.assertCurrent(ctx);
-
-        this.setStatus(ctx, 'validating_action', 'Checking the proposed action…');
-        const action = plan.action;
-        debugLog('action_validated', { type: action.type, repaired: plan.repaired });
-
-        if (action.type === 'complete') {
-          this.finalResult = redactText(action.result);
-          await this.log(ctx, { actionType: 'complete', actionSummary: 'Finished', outcome: 'completed', detail: this.finalResult });
-          this.setStatus(ctx, 'completed', 'Done');
-          return;
-        }
-        if (action.type === 'ask_user') {
-          if (mode === 'autonomous') {
-            // Nobody is there to answer: tell the model to decide, and only end the run if it keeps asking.
-            this.failures++;
-            this.history.push({ step: this.step, action: 'ask_user', outcome: 'REJECTED: nobody can answer. Decide yourself and continue' });
-            await this.log(ctx, { actionType: 'ask_user', actionSummary: 'Model asked a question; told to decide itself', outcome: 'info', detail: redactText(action.question) });
-            if (this.failures >= MAX_CONSECUTIVE_FAILURES) {
-              this.finalResult = redactText(`Stopped without finishing. Open question: ${action.question}`);
-              this.setStatus(ctx, 'completed', 'Done');
-              return;
+          if (action.type === 'observe') {
+            await this.guardLoop(ctx, stepSignature(action, null, map), summarizeAction(action, null));
+            this.history.push({ step: this.step, action: 'observe', outcome: truncate(redactText(action.reason), 120) });
+            await this.log(ctx, { actionType: 'observe', actionSummary: 'Re-read the page', outcome: 'info', detail: action.reason });
+            continue;
+          }
+          if (action.type === 'go_back') {
+            await this.guardLoop(ctx, stepSignature(action, null, map), summarizeAction(action, null));
+            this.setStatus(ctx, 'executing', 'Going back…');
+            const entryId = crypto.randomUUID();
+            try {
+              await chrome.tabs.goBack(tabId);
+            } catch {
+              this.setStatus(ctx, 'observing_result', 'There is no previous page.');
+              if (!(await this.recover(ctx, { id: entryId, actionType: 'go_back', actionSummary: summarizeAction(action, null) }, 'failed', 'There is no previous page to go back to'))) return;
+              continue;
             }
+            await this.log(ctx, { id: entryId, actionType: 'go_back', actionSummary: summarizeAction(action, null), outcome: 'executed', detail: action.reason });
+            this.history.push({ step: this.step, action: 'go_back', outcome: 'Went back to the previous page' });
+            this.failures = 0;
+            this.setStatus(ctx, 'observing_result', 'Checking the result…');
+            await this.settle(tabId, true);
+            this.assertCurrent(ctx);
             continue;
           }
-          this.question = redactText(action.question);
-          this.lastQuestion = { question: this.question, goal: this.baseGoal };
-          await this.log(ctx, { actionType: 'ask_user', actionSummary: 'Asked a question', outcome: 'info', detail: this.question });
-          this.setStatus(ctx, 'completed', 'The assistant needs more information from you.');
-          return;
-        }
-        if (action.type === 'observe') {
-          await this.guardLoop(ctx, stepSignature(action, null, map), summarizeAction(action, null));
-          this.history.push({ step: this.step, action: 'observe', outcome: truncate(redactText(action.reason), 120) });
-          await this.log(ctx, { actionType: 'observe', actionSummary: 'Re-read the page', outcome: 'info', detail: action.reason });
-          continue;
-        }
-        if (action.type === 'go_back') {
-          await this.guardLoop(ctx, stepSignature(action, null, map), summarizeAction(action, null));
-          this.setStatus(ctx, 'executing', 'Going back…');
+
+          // ---- target verification against the map we just collected ----
+          let target: ElementDescriptor | null = null;
+          if ('targetId' in action) {
+            target = map.elements.find((e) => e.id === action.targetId) ?? null;
+            if (!target) {
+              if (!(await this.recover(ctx, { actionType: action.type, actionSummary: `Model referenced unknown element ${action.targetId}` }, 'failed', 'That id is not in page.elements'))) return;
+              continue;
+            }
+
+            // Stay on this site: a link that leaves the origin is never followed.
+            const leaves = this.startOrigin ? scopeViolation(action, target, this.startOrigin) : null;
+            if (leaves) {
+              if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: describeTarget(target) }, 'blocked', leaves))) return;
+              continue;
+            }
+
+            // Off-screen targets: the extension scrolls them into view, then regenerates the map.
+            if (isMutating(action) && !target.inViewport) {
+              const r = await sendToContent(
+                tabId,
+                { type: 'cs/scroll_to_target', targetId: target.id, fingerprint: target.fingerprint },
+                SimpleContentResponseSchema,
+              );
+              this.assertCurrent(ctx);
+              if (!r.ok) {
+                if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: describeTarget(target) }, 'failed', r.message))) return;
+                continue;
+              }
+              await sleep(150);
+              this.assertCurrent(ctx);
+              map = await this.collect(tabId);
+              this.assertCurrent(ctx);
+              const again = map.elements.find((e) => e.id === target!.id);
+              if (!again || again.fingerprint !== target.fingerprint) {
+                if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: describeTarget(target) }, 'failed', 'The element was not found after the page changed'))) return;
+                continue;
+              }
+              target = again;
+            }
+          }
+
+          // ---- local risk classification + policy (the model has no say) ----
+          const { assessment, decision } = decide(action, target, map.url, mode, userGoal);
+          if (decision === 'block') {
+            const why = assessment.reasons.join('; ');
+            if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: target ? describeTarget(target) : null, risk: assessment.risk }, 'blocked', why))) return;
+            continue;
+          }
+          const proposal: Proposal = {
+            actionId: crypto.randomUUID(),
+            action,
+            summary: summarizeAction(action, target),
+            targetDescription: target ? describeTarget(target) : null,
+            modelReason: modelReason(action),
+            literalText: literalTextOf(action, target),
+            risk: assessment,
+            autoExecute: decision === 'auto',
+          };
+
+          // Loop check: before anything is shown or run, so the user is asked instead of the page changing again.
+          await this.guardLoop(ctx, stepSignature(action, target, map), proposal.summary);
+
+          this.proposal = proposal;
+          this.proposalTarget = target ? { id: target.id, fingerprint: target.fingerprint } : null;
+          this.pageChanged = false;
+
+          // One activity-log row per step: its outcome advances in place (proposed, approved, executed...).
           const entryId = crypto.randomUUID();
-          try {
-            await chrome.tabs.goBack(tabId);
-          } catch {
-            this.setStatus(ctx, 'observing_result', 'There is no previous page.');
-            if (!(await this.recover(ctx, { id: entryId, actionType: 'go_back', actionSummary: summarizeAction(action, null) }, 'failed', 'There is no previous page to go back to'))) return;
-            continue;
-          }
-          await this.log(ctx, { id: entryId, actionType: 'go_back', actionSummary: summarizeAction(action, null), outcome: 'executed', detail: action.reason });
-          this.history.push({ step: this.step, action: 'go_back', outcome: 'Went back to the previous page' });
-          this.failures = 0;
-          this.setStatus(ctx, 'observing_result', 'Checking the result…');
-          await this.settle(tabId, true);
+          const stepLog = (outcome: LogEntry['outcome'], detail: string | null) =>
+            this.log(ctx, {
+              id: entryId,
+              actionType: action.type,
+              actionSummary: proposal.summary,
+              target: proposal.targetDescription,
+              risk: assessment.risk,
+              outcome,
+              detail,
+            });
+          await stepLog('proposed', assessment.reasons.join('; '));
           this.assertCurrent(ctx);
-          continue;
-        }
 
-        // ---- target verification against the map we just collected ----
-        let target: ElementDescriptor | null = null;
-        if ('targetId' in action) {
-          target = map.elements.find((e) => e.id === action.targetId) ?? null;
-          if (!target) {
-            if (!(await this.recover(ctx, { actionType: action.type, actionSummary: `Model referenced unknown element ${action.targetId}` }, 'failed', 'That id is not in page.elements'))) return;
-            continue;
-          }
-
-          // Stay on this site: a link that leaves the origin is never followed.
-          const leaves = this.startOrigin ? scopeViolation(action, target, this.startOrigin) : null;
-          if (leaves) {
-            if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: describeTarget(target) }, 'blocked', leaves))) return;
-            continue;
-          }
-
-          // Off-screen targets: the extension scrolls them into view, then regenerates the map.
-          if (isMutating(action) && !target.inViewport) {
-            const r = await sendToContent(
+          // ---- visible highlight before anything happens ----
+          if (target) {
+            const h = await sendToContent(
               tabId,
-              { type: 'cs/scroll_to_target', targetId: target.id, fingerprint: target.fingerprint },
+              { type: 'cs/highlight', targetId: target.id, fingerprint: target.fingerprint, label: truncate(proposal.summary, 80) },
               SimpleContentResponseSchema,
             );
             this.assertCurrent(ctx);
-            if (!r.ok) {
-              if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: describeTarget(target) }, 'failed', r.message))) return;
+            if (!h.ok) {
+              this.proposal = null;
+              this.proposalTarget = null;
+              if (!(await this.recover(ctx, { id: entryId, actionType: action.type, actionSummary: proposal.summary, target: proposal.targetDescription, risk: assessment.risk }, 'failed', h.message))) return;
               continue;
             }
-            await sleep(150);
+          }
+
+          if (decision === 'confirm') {
+            this.setStatus(ctx, 'awaiting_confirmation', 'Waiting for your approval…');
+            const d = await new Promise<Decision>((resolve) => {
+              this.pending = { actionId: proposal.actionId, resolve };
+            });
             this.assertCurrent(ctx);
-            map = await this.collect(tabId);
-            this.assertCurrent(ctx);
-            const again = map.elements.find((e) => e.id === target!.id);
-            if (!again || again.fingerprint !== target.fingerprint) {
-              if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: describeTarget(target) }, 'failed', 'The element was not found after the page changed'))) return;
-              continue;
+            if (d === 'stop') throw new RunStopped();
+            if (d === 'reject') {
+              await stepLog('rejected', 'Rejected by user');
+              await this.clearHighlight();
+              this.proposal = null;
+              return this.finishStopped(ctx, 'You rejected the proposed action, so the run was stopped.');
             }
-            target = again;
-          }
-        }
-
-        // ---- local risk classification + policy (the model has no say) ----
-        const { assessment, decision } = decide(action, target, map.url, mode, userGoal);
-        if (decision === 'block') {
-          const why = assessment.reasons.join('; ');
-          if (!(await this.recover(ctx, { actionType: action.type, actionSummary: summarizeAction(action, target), target: target ? describeTarget(target) : null, risk: assessment.risk }, 'blocked', why))) return;
-          continue;
-        }
-        const proposal: Proposal = {
-          actionId: crypto.randomUUID(),
-          action,
-          summary: summarizeAction(action, target),
-          targetDescription: target ? describeTarget(target) : null,
-          modelReason: modelReason(action),
-          literalText: literalTextOf(action, target),
-          risk: assessment,
-          autoExecute: decision === 'auto',
-        };
-
-        // Loop check: before anything is shown or run, so the user is asked instead of the page changing again.
-        await this.guardLoop(ctx, stepSignature(action, target, map), proposal.summary);
-
-        this.proposal = proposal;
-        this.proposalTarget = target ? { id: target.id, fingerprint: target.fingerprint } : null;
-        this.pageChanged = false;
-
-        // One activity-log row per step: its outcome advances in place (proposed, approved, executed...).
-        const entryId = crypto.randomUUID();
-        const stepLog = (outcome: LogEntry['outcome'], detail: string | null) =>
-          this.log(ctx, {
-            id: entryId,
-            actionType: action.type,
-            actionSummary: proposal.summary,
-            target: proposal.targetDescription,
-            risk: assessment.risk,
-            outcome,
-            detail,
-          });
-        await stepLog('proposed', assessment.reasons.join('; '));
-        this.assertCurrent(ctx);
-
-        // ---- visible highlight before anything happens ----
-        if (target) {
-          const h = await sendToContent(
-            tabId,
-            { type: 'cs/highlight', targetId: target.id, fingerprint: target.fingerprint, label: truncate(proposal.summary, 80) },
-            SimpleContentResponseSchema,
-          );
-          this.assertCurrent(ctx);
-          if (!h.ok) return this.fail(ctx, h.message);
-        }
-
-        if (decision === 'confirm') {
-          this.setStatus(ctx, 'awaiting_confirmation', 'Waiting for your approval…');
-          const d = await new Promise<Decision>((resolve) => {
-            this.pending = { actionId: proposal.actionId, resolve };
-          });
-          this.assertCurrent(ctx);
-          if (d === 'stop') throw new RunStopped();
-          if (d === 'reject') {
-            await stepLog('rejected', 'Rejected by user');
-            await this.clearHighlight();
-            this.proposal = null;
-            return this.finishStopped(ctx, 'You rejected the proposed action, so the run was stopped.');
-          }
-          await stepLog('approved', 'Approved by you');
-        } else {
-          if (target) await sleep(AUTO_PREVIEW_MS);
-          this.assertCurrent(ctx);
-        }
-
-        const blockedNow = await this.assertTabStillAllowed(tabId, settings);
-        this.assertCurrent(ctx);
-        if (blockedNow) return this.fail(ctx, blockedNow);
-
-        // ---- execute exactly this one action through the content script ----
-        this.setStatus(ctx, 'executing', 'Running the approved action…');
-        let result: ExecResult;
-        try {
-          result = await sendToContent(
-            tabId,
-            { type: 'cs/execute', action, fingerprint: target?.fingerprint },
-            ExecResultSchema,
-          );
-        } catch (e) {
-          if (action.type === 'click' && isPortClosedError(e)) {
-            result = { ok: true, message: 'The page navigated after the click.', navigating: true };
+            await stepLog('approved', 'Approved by you');
           } else {
-            throw e;
+            if (target) await sleep(AUTO_PREVIEW_MS);
+            this.assertCurrent(ctx);
           }
-        }
-        this.assertCurrent(ctx);
-        this.proposal = null;
-        this.proposalTarget = null;
 
-        if (!result.ok) {
-          // The page refused (stale, covered, disabled, sensitive...): not fatal, try another way.
-          this.setStatus(ctx, 'observing_result', 'That did not work; trying another way…');
+          const blockedNow = await this.assertTabStillAllowed(tabId, settings);
+          this.assertCurrent(ctx);
+          if (blockedNow) return this.fail(ctx, blockedNow);
+
+          // ---- execute exactly this one action through the content script ----
+          this.setStatus(ctx, 'executing', 'Running the approved action…');
+          let result: ExecResult;
+          try {
+            result = await sendToContent(
+              tabId,
+              { type: 'cs/execute', action, fingerprint: target?.fingerprint },
+              ExecResultSchema,
+            );
+          } catch (e) {
+            if (action.type === 'click' && isPortClosedError(e)) {
+              result = { ok: true, message: 'The page navigated after the click.', navigating: true };
+            } else {
+              throw e;
+            }
+          }
+          this.assertCurrent(ctx);
+          this.proposal = null;
+          this.proposalTarget = null;
+
+          if (!result.ok) {
+            // The page refused (stale, covered, disabled, sensitive...): not fatal, try another way.
+            this.setStatus(ctx, 'observing_result', 'That did not work; trying another way…');
+            await this.clearHighlight();
+            const what = { id: entryId, actionType: action.type, actionSummary: proposal.summary, target: proposal.targetDescription, risk: assessment.risk };
+            if (!(await this.recover(ctx, what, 'failed', `${result.code}: ${result.message}`))) return;
+            continue;
+          }
+
+          this.failures = 0;
+          await stepLog(decision === 'auto' ? 'auto_executed' : 'executed', `${decision === 'confirm' ? 'Approved by you. ' : ''}${result.message}`);
+          this.history.push({ step: this.step, action: truncate(proposal.summary, 160), outcome: truncate(result.message, 160) });
+          if (result.extracted) {
+            this.extracted = [...this.extracted, result.extracted].slice(-10);
+            this.lastExtraction = extractionToText(result.extracted);
+          }
+
+          this.setStatus(ctx, 'observing_result', 'Checking the result…');
+          await this.settle(tabId, !!result.navigating);
+          this.assertCurrent(ctx);
+        } catch (e) {
+          if (e instanceof RunStopped) throw e;
+          /* Anything that goes wrong inside one step (the page changed, a script was unreachable, a highlight
+             or execute failed...) is a reason to look again and choose another way, not to give up. */
+          this.assertCurrent(ctx);
+          if (!(await chrome.tabs.get(tabId).catch(() => null))) return this.fail(ctx, 'The tab was closed.');
+          this.proposal = null;
+          this.proposalTarget = null;
+          this.status = 'observing_result'; // a step can fail from any stage; the next pass re-reads the page
           await this.clearHighlight();
-          const what = { id: entryId, actionType: action.type, actionSummary: proposal.summary, target: proposal.targetDescription, risk: assessment.risk };
-          if (!(await this.recover(ctx, what, 'failed', `${result.code}: ${result.message}`))) return;
-          continue;
+          const reason = redactText(e instanceof Error ? e.message : String(e));
+          if (!(await this.recover(ctx, { actionType: 'run', actionSummary: 'That step could not be completed' }, 'failed', reason))) return;
+          await sleep(300); // give a page that is still loading a moment before re-reading it
         }
-
-        this.failures = 0;
-        await stepLog(decision === 'auto' ? 'auto_executed' : 'executed', `${decision === 'confirm' ? 'Approved by you. ' : ''}${result.message}`);
-        this.history.push({ step: this.step, action: truncate(proposal.summary, 160), outcome: truncate(result.message, 160) });
-        if (result.extracted) {
-          this.extracted = [...this.extracted, result.extracted].slice(-10);
-          this.lastExtraction = extractionToText(result.extracted);
-        }
-
-        this.setStatus(ctx, 'observing_result', 'Checking the result…');
-        await this.settle(tabId, !!result.navigating);
-        this.assertCurrent(ctx);
       }
     } catch (e) {
       if (e instanceof RunStopped) return;
