@@ -5,7 +5,7 @@ import type { Session } from './session';
 import type { SessionManager } from './sessionManager';
 
 const DECISION_PAGE = 'decision/index.html';
-const ICON = 'icons/icon128.png';
+const ICON = 'icons/webpilot-128.png';
 const NOTICE_PREFIX = 'notice:';
 const DECISION_PREFIX = 'decision:';
 
@@ -42,8 +42,11 @@ export function notificationSummary(proposal: Proposal, targetDescription: strin
  *    are waiting, and a system notification announces the new one.
  */
 export class DecisionCenter {
-  /** Connected side panels and the tab each one is showing (null until it says). */
-  private readonly panels = new Map<chrome.runtime.Port, number | null>();
+  /**
+   * Connected side panels: the tab each one belongs to (resolved from its binding, null until it says) and
+   * whether it reports itself visible. Visibility only decides whether to notify; it never affects a run.
+   */
+  private readonly panels = new Map<chrome.runtime.Port, { tabId: number | null; visible: boolean }>();
   private readonly announced = new Set<string>();
   private readonly lastStatus = new Map<string, string>();
   private readonly buttons = new Map<string, { sessionId: string; actionId: string | null; actions: ButtonAction[] }>();
@@ -58,10 +61,13 @@ export class DecisionCenter {
   register(): void {
     chrome.runtime.onConnect.addListener((port) => {
       if (port.name !== PANEL_PORT) return;
-      this.panels.set(port, null);
+      this.panels.set(port, { tabId: null, visible: true });
       port.onMessage.addListener((m: unknown) => {
-        const tabId = (m as { tabId?: unknown } | null)?.tabId;
-        if (typeof tabId === 'number') this.panels.set(port, tabId);
+        const msg = (m ?? {}) as { bindingId?: unknown; visible?: unknown };
+        const cur = this.panels.get(port) ?? { tabId: null, visible: true };
+        // The tab comes from the binding the worker issued, never from what the panel claims.
+        const b = typeof msg.bindingId === 'string' ? this.mgr.bindingById(msg.bindingId) : undefined;
+        this.panels.set(port, { tabId: b ? b.ownerTabId : cur.tabId, visible: typeof msg.visible === 'boolean' ? msg.visible : cur.visible });
       });
       port.onDisconnect.addListener(() => {
         this.panels.delete(port);
@@ -75,9 +81,16 @@ export class DecisionCenter {
     });
   }
 
-  private panelOpenFor(tabId: number): boolean {
-    for (const t of this.panels.values()) if (t === tabId) return true;
-    return false;
+  /**
+   * Is the owner tab's panel actually in front of the user? A connected but hidden panel (the user is on
+   * another tab) does not count, so the decision reaches them through the popup and notification instead.
+   */
+  private async panelShowing(tabId: number): Promise<boolean> {
+    let connected = false;
+    for (const p of this.panels.values()) if (p.tabId === tabId && p.visible) connected = true;
+    if (!connected) return false;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    return !!tab?.active;
   }
 
   private onSession(s: Session): void {
@@ -99,14 +112,18 @@ export class DecisionCenter {
       const key = `${s.id}:${d.kind}:${d.proposal?.actionId ?? ''}`;
       if (this.announced.has(key)) return;
       this.announced.add(key);
-      if (this.panelOpenFor(s.tabId)) return; // the panel is showing it
-      this.raise(d);
+      void this.panelShowing(s.tabId).then((showing) => {
+        if (!showing) this.raise(d); // otherwise the panel in front of the user already shows it
+      });
       return;
     }
 
-    if (previous !== status && !this.panelOpenFor(s.tabId)) {
-      if (status === 'completed') this.notice(s, 'WebPilot finished', `Done${s.getHost() ? ` on ${s.getHost()}` : ''}: ${truncate(s.getPrompt(), 80)}`);
-      else if (status === 'error') this.notice(s, 'WebPilot run failed', `A run${s.getHost() ? ` on ${s.getHost()}` : ''} stopped with an error. Open WebPilot to see why.`);
+    if (previous !== status) {
+      void this.panelShowing(s.tabId).then((showing) => {
+        if (showing) return;
+        if (status === 'completed') this.notice(s, 'WebPilot finished', `Done${s.getHost() ? ` on ${s.getHost()}` : ''}: ${truncate(s.getPrompt(), 80)}`);
+        else if (status === 'error') this.notice(s, 'WebPilot run failed', `A run${s.getHost() ? ` on ${s.getHost()}` : ''} stopped with an error. Open WebPilot to see why.`);
+      });
     }
   }
 

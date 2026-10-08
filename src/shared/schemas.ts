@@ -300,6 +300,18 @@ export const PanelStateSchema = z.object({
   finalResult: z.string().nullable(),
   question: z.string().nullable(),
   dryRunPayload: z.string().nullable(),
+  /** The panel's own binding: which tab it belongs to and whether the user approved WebPilot there. */
+  binding: z
+    .object({
+      bindingId: z.string(),
+      ownerTabId: z.number(),
+      ownerWindowId: z.number().nullable(),
+      approved: z.boolean(),
+      title: z.string().nullable(),
+      /** Host last seen on this tab; shown when the live address can no longer be read. */
+      lastKnownHost: z.string().nullable(),
+    })
+    .nullable(),
 });
 export type PanelState = z.infer<typeof PanelStateSchema>;
 
@@ -319,6 +331,21 @@ export const DecisionViewSchema = z.object({
 export type DecisionView = z.infer<typeof DecisionViewSchema>;
 
 /** Persisted (chrome.storage.session) subset of one run. Never contains DOM references or page content. */
+/** One panel and tab pairing. The owner never changes; navigation changes only the metadata. */
+export const TabBindingSchema = z.object({
+  bindingId: z.string(),
+  ownerTabId: z.number(),
+  ownerWindowId: z.number().nullable(),
+  url: z.string().nullable(),
+  title: z.string().nullable(),
+  /** Origin the user approved for this tab's session, or null when access has not been (or is no longer) approved. */
+  approvedOrigin: z.string().nullable(),
+  /** Bumped on every navigation so stale work for an older document can be recognised. */
+  generation: z.number(),
+  createdAt: z.number(),
+});
+export type TabBinding = z.infer<typeof TabBindingSchema>;
+
 export const PersistedRunSchema = z.object({
   sessionId: z.string(),
   status: RunStatusSchema,
@@ -343,6 +370,7 @@ export const ExecCodeSchema = z.enum([
   'SENSITIVE',
   'UNSUPPORTED',
   'VERIFY_FAILED',
+  'STALE_DOCUMENT',
   'BAD_MESSAGE',
   'ERROR',
 ]);
@@ -360,7 +388,8 @@ export const ExecResultSchema = z.discriminatedUnion('ok', [
 export type ExecResult = z.infer<typeof ExecResultSchema>;
 
 export const MapResponseSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), map: PageMapSchema }),
+  /** `docId` identifies the document the map came from; actions are pinned to it. */
+  z.object({ ok: z.literal(true), map: PageMapSchema, docId: z.string() }),
   z.object({ ok: z.literal(false), code: ExecCodeSchema, message: z.string() }),
 ]);
 export type MapResponse = z.infer<typeof MapResponseSchema>;

@@ -35,6 +35,8 @@ export const LOOP_WINDOW = 8;
 export const LOOP_REPEATS = 4;
 /** Recoverable failures in a row (bad target, blocked, failed action...) before the run gives up. */
 export const MAX_CONSECUTIVE_FAILURES = 6;
+/** Where `npm run logs` listens; the extension posts each activity-log row here when it is running. */
+export const RUN_LOG_URL = 'http://127.0.0.1:8787/log';
 /** Name of the port a side panel keeps open while it is alive. */
 export const PANEL_PORT = 'webpilot-panel';
 export const NAVIGATION_WAIT_MS = 10_000;
@@ -45,6 +47,7 @@ export const STORAGE_KEYS = {
   log: 'wp_activity_log',
   disclosure: 'wp_disclosure_ack',
   runs: 'wp_run_states',
+  bindings: 'wp_tab_bindings',
   lastError: 'wp_last_error',
 } as const;
 

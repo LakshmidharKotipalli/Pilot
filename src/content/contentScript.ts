@@ -7,7 +7,7 @@ import { createMutationTracker } from './mutationTracking';
 
 type Disposable = { __webpilotDispose?: () => void };
 
-type Reply = ExecResult | MapResponse | { ok: true } | { ok: false; code: string; message: string };
+type Reply = ExecResult | MapResponse | { ok: true; docId?: string } | { ok: false; code: string; message: string };
 
 function init(): void {
   const w = window as unknown as Disposable;
@@ -17,6 +17,15 @@ function init(): void {
   } catch {
     /* previous context is gone */
   }
+
+  // Identifies this document load. Every action from the worker names the docId it was planned against,
+  // so an action for a page that has since been replaced (navigation, reload) is refused, not replayed.
+  // (randomUUID is secure-context only, and this runs on plain http pages too.)
+  const docId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const stale = (id: string): Reply | null =>
+    id === docId
+      ? null
+      : { ok: false, code: 'STALE_DOCUMENT', message: 'The page was replaced after this action was planned, so it was cancelled.' };
 
   const tracker = createMutationTracker(document, () => {
     try {
@@ -29,13 +38,15 @@ function init(): void {
   async function handle(msg: ToContentMessage): Promise<Reply> {
     switch (msg.type) {
       case 'cs/ping':
-        return { ok: true };
+        return { ok: true, docId };
       case 'cs/collect_map': {
         const map = buildInteractionMap(document);
         tracker.markFresh();
-        return { ok: true, map };
+        return { ok: true, map, docId };
       }
       case 'cs/highlight': {
+        const gone = stale(msg.docId);
+        if (gone) return gone;
         const t = findTarget(msg.targetId, msg.fingerprint, document);
         if (!t.ok) return { ok: false, code: t.code, message: t.message };
         if (typeof t.el.scrollIntoView === 'function') t.el.scrollIntoView({ block: 'center', inline: 'center' });
@@ -43,6 +54,8 @@ function init(): void {
         return { ok: true };
       }
       case 'cs/scroll_to_target': {
+        const gone = stale(msg.docId);
+        if (gone) return gone;
         const t = findTarget(msg.targetId, msg.fingerprint, document);
         if (!t.ok) return { ok: false, code: t.code, message: t.message };
         if (typeof t.el.scrollIntoView === 'function') t.el.scrollIntoView({ block: 'center', inline: 'center' });
@@ -53,6 +66,8 @@ function init(): void {
         clearHighlight();
         return { ok: true };
       case 'cs/execute': {
+        const gone = stale(msg.docId);
+        if (gone) return gone;
         const result = await executeAction(msg.action, msg.fingerprint, document);
         tracker.markStale(); // the page state has (probably) changed; the worker re-collects
         return result;

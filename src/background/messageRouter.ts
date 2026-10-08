@@ -6,7 +6,7 @@ import {
   type UiResponse,
 } from '../shared/messages';
 import { redactText } from '../shared/redaction';
-import type { AgentAction } from '../shared/schemas';
+import type { AgentAction, TabBinding } from '../shared/schemas';
 import type { SessionManager } from './sessionManager';
 import { appendLog, clearLog, getLog } from './activityLog';
 import { readLastError, recentDebug, setDebug } from './debug';
@@ -27,7 +27,32 @@ export function normalizeHost(raw: string): string {
   return h;
 }
 
-async function buildDiagnostics(mgr: SessionManager, tabId?: number) {
+/**
+ * Who is calling. A side panel names its binding in its own URL (set by the worker when it opened the
+ * panel), so its tab is never taken from message content or from "the active tab".
+ */
+export type Caller =
+  | { kind: 'panel'; binding: TabBinding }
+  | { kind: 'panel-unbound' }
+  | { kind: 'other' };
+
+const PANEL_PATH = '/sidepanel/index.html';
+
+export function identify(senderUrl: string | undefined, mgr: SessionManager): Caller {
+  try {
+    const u = new URL(senderUrl ?? '');
+    if (u.pathname !== PANEL_PATH) return { kind: 'other' };
+    const id = u.searchParams.get('bindingId');
+    const binding = id ? mgr.bindingById(id) : undefined;
+    return binding ? { kind: 'panel', binding } : { kind: 'panel-unbound' };
+  } catch {
+    return { kind: 'other' };
+  }
+}
+
+const UNBOUND = 'This WebPilot panel is not attached to a tab session. Click the WebPilot toolbar icon on the tab you want to use.';
+
+async function buildDiagnostics(mgr: SessionManager, tabId: number | null) {
   const s = await mgr.getSnapshot(tabId);
   const perms = await chrome.permissions.getAll();
   return {
@@ -51,30 +76,67 @@ async function buildDiagnostics(mgr: SessionManager, tabId?: number) {
   };
 }
 
-async function handleUi(msg: UiMessage, mgr: SessionManager): Promise<unknown> {
+/** A panel may only touch the session that runs on its own tab. */
+function ownSession(caller: Caller, mgr: SessionManager, sessionId: string): void {
+  if (caller.kind === 'panel-unbound') throw new UserError(UNBOUND);
+  if (caller.kind === 'panel' && mgr.sessionById(sessionId)?.tabId !== caller.binding.ownerTabId) {
+    throw new UserError('That session belongs to another tab.');
+  }
+}
+
+function closePanel(tabId: number): void {
+  try {
+    void chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => undefined);
+  } catch {
+    /* side panel API unavailable */
+  }
+}
+
+export async function handleUi(msg: UiMessage, mgr: SessionManager, caller: Caller = { kind: 'other' }): Promise<unknown> {
   switch (msg.type) {
     case 'ui/run_prompt':
-      await mgr.start(msg.prompt, msg.tabId);
+      if (caller.kind !== 'panel') throw new UserError(UNBOUND);
+      await mgr.start(msg.prompt, caller.binding.ownerTabId);
+      return null;
+    case 'ui/answer':
+      ownSession(caller, mgr, msg.sessionId);
+      await mgr.answer(msg.sessionId, msg.answer);
+      return null;
+    case 'ui/approve_session':
+      if (caller.kind !== 'panel') throw new UserError(UNBOUND);
+      await mgr.approveSession(caller.binding.bindingId);
+      return null;
+    case 'ui/end_session':
+      if (caller.kind !== 'panel') throw new UserError(UNBOUND);
+      mgr.endSession(caller.binding.bindingId);
+      closePanel(caller.binding.ownerTabId);
       return null;
     case 'ui/approve':
+      ownSession(caller, mgr, msg.sessionId);
       if (!mgr.approve(msg.sessionId, msg.actionId)) throw new UserError('No matching action is waiting for approval.');
       return null;
     case 'ui/reject':
+      ownSession(caller, mgr, msg.sessionId);
       if (!mgr.reject(msg.sessionId, msg.actionId)) throw new UserError('No matching action is waiting for approval.');
       return null;
     case 'ui/preview':
+      ownSession(caller, mgr, msg.sessionId);
       return mgr.preview(msg.sessionId, msg.actionId);
     case 'ui/continue':
+      ownSession(caller, mgr, msg.sessionId);
       if (!mgr.continueRun(msg.sessionId)) throw new UserError('That run is not waiting to continue.');
       return null;
     case 'ui/stop':
+      ownSession(caller, mgr, msg.sessionId);
       mgr.stop(msg.sessionId);
       return null;
     case 'ui/stop_all':
+      // Only the cross-session decision window may do this; a panel controls its own tab alone.
+      if (caller.kind !== 'other') throw new UserError('A panel can only stop its own tab’s session.');
       mgr.stopAll();
       return null;
     case 'ui/get_state':
-      return mgr.getSnapshot(msg.tabId);
+      return mgr.getSnapshot(caller.kind === 'panel' ? caller.binding.ownerTabId : null);
     case 'ui/get_decisions':
       return mgr.decisions();
     case 'ui/get_settings':
@@ -141,7 +203,7 @@ async function handleUi(msg: UiMessage, mgr: SessionManager): Promise<unknown> {
       mgr.publish();
       return null;
     case 'ui/get_diagnostics':
-      return buildDiagnostics(mgr, msg.tabId);
+      return buildDiagnostics(mgr, caller.kind === 'panel' ? caller.binding.ownerTabId : null);
   }
 }
 
@@ -157,7 +219,7 @@ export function registerMessageRouter(mgr: SessionManager): void {
         sendResponse({ ok: false, error: 'Rejected malformed message.' });
         return false;
       }
-      handleUi(parsed.data, mgr).then(
+      handleUi(parsed.data, mgr, identify(sender.url, mgr)).then(
         (data) => sendResponse({ ok: true, data }),
         (e: unknown) =>
           sendResponse({
@@ -170,7 +232,8 @@ export function registerMessageRouter(mgr: SessionManager): void {
 
     if (sender.tab) {
       const parsed = ContentToBgMessageSchema.safeParse(raw);
-      if (parsed.success && parsed.data.type === 'content/stale' && sender.tab.id !== undefined) {
+      // Only a page's top frame, in a tab that has a session, can mark that tab's map stale.
+      if (parsed.success && parsed.data.type === 'content/stale' && sender.tab.id !== undefined && sender.frameId === 0) {
         mgr.markMapStale(sender.tab.id);
       }
       return false;

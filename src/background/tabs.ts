@@ -8,9 +8,11 @@ export class UserError extends Error {
   }
 }
 
-export async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab ?? null;
+/** Every message to a page goes to one named tab's top frame. There is no "current tab" anywhere here. */
+const TOP_FRAME = { frameId: 0 } as const;
+
+export function sendToTab(tabId: number, message: unknown): Promise<unknown> {
+  return chrome.tabs.sendMessage(tabId, message, TOP_FRAME);
 }
 
 const UNREACHABLE = /cannot access|cannot be scripted|extensions gallery|chrome:\/\/|manifest must request permission|showing error page/i;
@@ -19,7 +21,7 @@ const PORT_CLOSED = /message channel closed|receiving end does not exist|message
 export function friendlyInjectionError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (UNREACHABLE.test(msg)) {
-    return 'WebPilot cannot access this page. It may be a browser-internal or protected page, or WebPilot has not been granted access to this tab yet. Click the WebPilot toolbar icon on the tab or use “Allow this site”.';
+    return 'WebPilot cannot access this page. It may be a browser-internal or protected page, or browser access to this tab was lost (for example after it navigated to another site). Click the WebPilot toolbar icon on this tab again.';
   }
   return `Could not reach the page: ${msg}`;
 }
@@ -31,7 +33,7 @@ export function isPortClosedError(e: unknown): boolean {
 /** Inject the content script only when it is not already answering. */
 export async function ensureContentScript(tabId: number): Promise<void> {
   try {
-    const pong = (await chrome.tabs.sendMessage(tabId, { type: 'cs/ping' })) as { ok?: boolean } | undefined;
+    const pong = (await sendToTab(tabId, { type: 'cs/ping' })) as { ok?: boolean } | undefined;
     if (pong?.ok) return;
   } catch {
     /* not injected yet */
@@ -42,7 +44,7 @@ export async function ensureContentScript(tabId: number): Promise<void> {
     throw new UserError(friendlyInjectionError(e));
   }
   try {
-    const pong = (await chrome.tabs.sendMessage(tabId, { type: 'cs/ping' })) as { ok?: boolean } | undefined;
+    const pong = (await sendToTab(tabId, { type: 'cs/ping' })) as { ok?: boolean } | undefined;
     if (!pong?.ok) throw new Error('no response');
   } catch (e) {
     throw new UserError(friendlyInjectionError(e));
@@ -55,7 +57,7 @@ export async function sendToContent<S extends z.ZodTypeAny>(
   message: unknown,
   schema: S,
 ): Promise<z.infer<S>> {
-  const raw: unknown = await chrome.tabs.sendMessage(tabId, message);
+  const raw: unknown = await sendToTab(tabId, message);
   const parsed = schema.safeParse(raw);
   if (!parsed.success) throw new UserError('The page returned an unexpected response.');
   return parsed.data;
