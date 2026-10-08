@@ -51,6 +51,8 @@ export function evaluateSite(
   url: string | undefined | null,
   settings: DomainSettings,
   incognito = false,
+  /** The user approved WebPilot on this tab's current origin for this session. */
+  sessionApproved = false,
 ): SiteVerdict {
   const host = hostFromUrl(url);
   if (url && parseUrl(url) && isUnsupportedUrl(url)) {
@@ -70,7 +72,7 @@ export function evaluateSite(
       allowed: false,
       paused: false,
       message:
-        'WebPilot cannot see this tab’s address yet. Click the WebPilot toolbar icon on the tab you want to use, or add the site by host name under Settings → Allowed sites. (Browser-internal pages are never available.)',
+        'Page access needed: WebPilot cannot see this tab’s address. Click the WebPilot toolbar icon on this tab to grant access again. (Browser-internal pages are never available.)',
     };
   }
   if (incognito) {
@@ -103,14 +105,14 @@ export function evaluateSite(
         'This looks like a sign-in, identity, or MFA page. WebPilot does not read these pages. No page content was collected or sent.',
     };
   }
-  const allowed = settings.allowedDomains.some((d) => matchesHostPattern(host, d));
+  const allowed = sessionApproved || settings.allowedDomains.some((d) => matchesHostPattern(host, d));
   if (!allowed) {
     return {
       host,
       code: 'not_allowlisted',
       allowed: false,
       paused: false,
-      message: `WebPilot is not enabled for “${host}”. Use “Allow this site” to enable it.`,
+      message: `WebPilot needs your approval before it reads or acts on “${host}”.`,
     };
   }
   if (settings.pausedDomains.some((d) => matchesHostPattern(host, d))) {

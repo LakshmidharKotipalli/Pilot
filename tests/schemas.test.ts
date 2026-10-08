@@ -80,10 +80,10 @@ describe('message schemas', () => {
 
   it('only lets the worker send validated executable actions to the content script', () => {
     expect(
-      ToContentMessageSchema.safeParse({ type: 'cs/execute', action: { type: 'complete', result: 'x' } }).success,
+      ToContentMessageSchema.safeParse({ type: 'cs/execute', docId: 'd', action: { type: 'complete', result: 'x' } }).success,
     ).toBe(false);
     expect(
-      ToContentMessageSchema.safeParse({ type: 'cs/execute', action: { type: 'click', targetId: 'el_1', reason: 'r' } }).success,
+      ToContentMessageSchema.safeParse({ type: 'cs/execute', docId: 'd', action: { type: 'click', targetId: 'el_1', reason: 'r' } }).success,
     ).toBe(true);
   });
 });

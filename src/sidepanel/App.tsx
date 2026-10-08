@@ -4,12 +4,14 @@ import { BgToUiMessageSchema, sendToBackground } from '../shared/messages';
 import { isActiveStatus } from '../shared/stateMachine';
 import { LogEntrySchema, PanelStateSchema, type LogEntry, type PanelState } from '../shared/schemas';
 import { ActionPreview } from './components/ActionPreview';
-import { ActivityLog } from './components/ActivityLog';
 import { LoopCard, QuestionCard } from './components/DecisionCards';
 import { ExtractedDataView } from './components/ExtractedDataView';
-import { PromptBox } from './components/PromptBox';
-import { SessionList } from './components/SessionList';
-import { SettingsLink } from './components/SettingsLink';
+import { AccessNotice } from './components/AccessNotice';
+import { Composer } from './components/Composer';
+import { Header } from './components/Header';
+import { LogDropdown } from './components/LogDropdown';
+import { getBlocker } from './lib/blocker';
+import { SettingsView } from './SettingsView';
 
 const STATUS_LABEL: Record<string, string> = {
   idle: 'Idle',
@@ -25,30 +27,29 @@ const STATUS_LABEL: Record<string, string> = {
   error: 'Error',
 };
 
-const MODE_LABEL = { safe: 'Safe mode', assisted: 'Assisted mode', autonomous: 'Autonomous mode' } as const;
-
 export default function App() {
   const [state, setState] = useState<PanelState | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [prompt, setPrompt] = useState('');
   const [uiError, setUiError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [view, setView] = useState<'main' | 'settings'>('main');
+  const [settingsToken, setSettingsToken] = useState(0);
 
-  // The tab this panel is showing. Every command names it, so the worker never has to guess "the active tab".
-  const [tabId, setTabId] = useState<number | null>(null);
-  const tabIdRef = useRef<number | null>(null);
+  // This panel belongs to the tab it was opened on. The worker put that binding in our URL; we never look
+  // at which tab is active, and the worker takes our tab from the binding, not from anything we send.
+  const bindingId = useRef(new URLSearchParams(location.search).get('bindingId')).current;
+  const ownerTabRef = useRef<number | null>(null);
   const portRef = useRef<chrome.runtime.Port | null>(null);
 
   const refresh = useCallback(async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const id = tab?.id ?? null;
-    tabIdRef.current = id;
-    setTabId(id);
-    portRef.current?.postMessage({ tabId: id });
-    const r = await sendToBackground<unknown>({ type: 'ui/get_state', tabId: id ?? undefined });
+    const r = await sendToBackground<unknown>({ type: 'ui/get_state' });
     if (!r.ok) return setUiError(r.error);
     const p = PanelStateSchema.safeParse(r.data);
-    if (p.success) setState(p.data);
+    if (p.success) {
+      ownerTabRef.current = p.data.binding?.ownerTabId ?? null;
+      setState(p.data);
+    }
   }, []);
 
   const refreshLog = useCallback(async () => {
@@ -68,8 +69,12 @@ export default function App() {
       if (closed) return;
       const port = chrome.runtime.connect({ name: PANEL_PORT });
       portRef.current = port;
-      port.postMessage({ tabId: tabIdRef.current });
+      const report = () => port.postMessage({ bindingId, visible: document.visibilityState === 'visible' });
+      report();
+      // Visibility only tells the worker whether to notify you elsewhere. It never pauses or stops a run.
+      document.addEventListener('visibilitychange', report);
       port.onDisconnect.addListener(() => {
+        document.removeEventListener('visibilitychange', report);
         portRef.current = null;
         setTimeout(connect, 500); // the worker restarted: reconnect
       });
@@ -82,9 +87,8 @@ export default function App() {
       if (p.data.type === 'bg/refresh') void refresh();
       else if (p.data.type === 'bg/state') {
         const incoming = p.data.state;
-        // Other tabs' sessions only update the session list; this tab's session updates the whole view.
-        if (incoming.tabId === tabIdRef.current) setState(incoming);
-        else setState((prev) => (prev ? { ...prev, sessions: incoming.sessions } : prev));
+        // Only this panel's own tab's session is ever shown here.
+        if (incoming.tabId === ownerTabRef.current) setState(incoming);
       } else {
         const entry = p.data.entry;
         /* One row per step: an update replaces its row where it is instead of adding a new one. */
@@ -95,44 +99,59 @@ export default function App() {
     };
     chrome.runtime.onMessage.addListener(onMsg);
 
-    const onTab = () => void refresh();
-    chrome.tabs.onActivated.addListener(onTab);
-    chrome.tabs.onUpdated.addListener(onTab);
     return () => {
       closed = true;
       portRef.current?.disconnect();
       chrome.runtime.onMessage.removeListener(onMsg);
-      chrome.tabs.onActivated.removeListener(onTab);
-      chrome.tabs.onUpdated.removeListener(onTab);
     };
-  }, [refresh, refreshLog]);
+  }, [refresh, refreshLog, bindingId]);
 
   if (!state) {
     return (
-      <div className="app">
-        <p className="muted">Loading…{uiError ? ` (${uiError})` : ''}</p>
+      <div className="panel">
+        <p className="muted" style={{ padding: 16 }}>
+          Loading…{uiError ? ` (${uiError})` : ''}
+        </p>
+      </div>
+    );
+  }
+
+  if (!state.binding) {
+    return (
+      <div className="panel">
+        <Header view="main" context={null} onOpenSettings={() => setView('settings')} onBack={() => setView('main')} />
+        <main className="scroll workspace">
+          <div className="empty">
+            <p>This WebPilot session has ended.</p>
+            <p className="small">Click the WebPilot toolbar icon on the tab you want to use.</p>
+          </div>
+        </main>
       </div>
     );
   }
 
   const running = isActiveStatus(state.status);
   const host = state.site.host;
-
-  const disabledReason = !state.disclosureAcknowledged
-    ? 'Accept the privacy disclosure above to enable Run.'
-    : !state.site.allowed
-      ? state.site.message
-      : !state.dryRun && !state.apiKeySet
-        ? 'Add an API key in Settings.'
-        : !state.dryRun && !state.modelId
-          ? 'Add a model ID in Settings.'
-          : null;
+  const blocker = getBlocker(state);
+  const hasTask = state.status !== 'idle';
 
   const run = async () => {
     setUiError(null);
-    const r = await sendToBackground({ type: 'ui/run_prompt', prompt, tabId: tabId ?? undefined });
+    const r = await sendToBackground({ type: 'ui/run_prompt', prompt });
     if (!r.ok) setUiError(r.error);
     else setPrompt('');
+  };
+
+  const approveSession = async () => {
+    setUiError(null);
+    const r = await sendToBackground({ type: 'ui/approve_session' });
+    if (!r.ok) setUiError(r.error);
+    void refresh();
+  };
+
+  const endSession = async () => {
+    const r = await sendToBackground({ type: 'ui/end_session' });
+    if (!r.ok) setUiError(r.error);
   };
 
   const allowSite = () => {
@@ -143,6 +162,7 @@ export default function App() {
       await perm;
       const r = await sendToBackground({ type: 'ui/allow_site', host });
       if (!r.ok) setUiError(r.error);
+      setSettingsToken((n) => n + 1);
       void refresh();
     })();
   };
@@ -151,159 +171,149 @@ export default function App() {
     if (!host) return;
     const r = await sendToBackground({ type: 'ui/pause_site', host, paused });
     if (!r.ok) setUiError(r.error);
+    setSettingsToken((n) => n + 1);
   };
 
   const copyDiagnostics = async () => {
-    const r = await sendToBackground({ type: 'ui/get_diagnostics', tabId: tabId ?? undefined });
+    const r = await sendToBackground({ type: 'ui/get_diagnostics' });
     if (!r.ok) return setUiError(r.error);
     await navigator.clipboard.writeText(JSON.stringify(r.data, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const onBlockerAction = () => {
+    switch (blocker?.action) {
+      case 'ack':
+        void sendToBackground({ type: 'ui/ack_disclosure' });
+        break;
+      case 'allow':
+        void approveSession();
+        break;
+      case 'resume':
+        void pauseSite(false);
+        break;
+      case 'settings':
+        setView('settings');
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
-    <div className="app">
-      <header className="card">
-        <div className="row spread">
-          <h1>WebPilot Agent</h1>
-          <SettingsLink />
-        </div>
-        <div className="row small" style={{ marginTop: 6 }}>
-          <span className="muted">Site:</span> <strong>{host ?? 'unknown'}</strong>
-          {state.scopeOrigin && <span className="badge" title="This run never leaves this site">Stays on {new URL(state.scopeOrigin).host}</span>}
-          <span className={`badge mode-${state.mode}`}>{MODE_LABEL[state.mode]}</span>
-          <span className="badge">{STATUS_LABEL[state.status]}</span>
-        </div>
-        <div className="small muted" style={{ marginTop: 4 }}>
-          Model: {state.modelId || '(not set)'}
-          {state.dryRun ? ' · DRY RUN (nothing is sent)' : ''}
-          {running ? ` · step ${state.step}` : ''}
-        </div>
-
-        <div className="row" style={{ marginTop: 8 }}>
-          {state.site.code === 'not_allowlisted' && (
-            <button type="button" className="primary" onClick={allowSite}>
-              Allow this site
-            </button>
-          )}
-          {state.site.code === 'ok' && (
-            <button type="button" onClick={() => void pauseSite(true)}>
-              Pause on this site
-            </button>
-          )}
-          {state.site.code === 'paused' && (
-            <button type="button" className="primary" onClick={() => void pauseSite(false)}>
-              Resume on this site
-            </button>
-          )}
-        </div>
-        {!state.site.allowed && (
-          <p className={state.site.code === 'blocked' || state.site.code === 'unsupported' ? 'error small' : 'notice small'} role="status" style={{ margin: '8px 0 0' }}>
-            {state.site.message}
-          </p>
-        )}
-      </header>
-
-      {!state.disclosureAcknowledged && (
-        <section className="card" aria-labelledby="disc-title">
-          <h2 id="disc-title">Before you start: what gets sent</h2>
-          <ul style={{ margin: '0 0 8px 18px', padding: 0 }}>
-            <li>Your instructions and a compact list of the page’s interactive elements (names, labels, visible text snippets, URL, title) are sent to the LLM provider you configure.</li>
-            <li>Password and other sensitive field values are never included; card numbers and IDs are redacted on a best-effort basis.</li>
-            <li>The extension only runs on sites you allow, never on banking, healthcare, identity or password-manager sites by default, and asks before consequential actions.</li>
-            <li>Your API key is kept in this browser’s extension storage, which is not a secure vault.</li>
-          </ul>
-          <button type="button" className="primary" onClick={() => void sendToBackground({ type: 'ui/ack_disclosure' })}>
-            I understand
-          </button>
-        </section>
-      )}
-
-      <PromptBox
-        value={prompt}
-        onChange={setPrompt}
-        onRun={() => void run()}
-        onStop={() => {
-          if (state.sessionId) void sendToBackground({ type: 'ui/stop', sessionId: state.sessionId });
-        }}
-        running={running}
-        disabledReason={disabledReason}
+    <div className="panel">
+      <Header
+        view={view}
+        context={state.binding ? { host: state.site.host ?? state.binding.lastKnownHost, title: state.binding.title } : null}
+        onOpenSettings={() => setView('settings')}
+        onBack={() => setView('main')}
       />
 
-      <SessionList
-        sessions={state.sessions}
-        currentTabId={tabId}
-        onStop={(sessionId) => void sendToBackground({ type: 'ui/stop', sessionId })}
-        onStopAll={() => void sendToBackground({ type: 'ui/stop_all' })}
-        // A click by the user is the only way a tab comes to the front; the agent never does it.
-        onGoToTab={(id) => void chrome.tabs.update(id, { active: true }).catch(() => undefined)}
-      />
+      {view === 'settings' ? (
+        <main className="scroll">
+          <SettingsView
+            state={state}
+            log={log}
+            reloadToken={settingsToken}
+            onClearLog={() => {
+              void sendToBackground({ type: 'ui/clear_log' }).then(() => setLog([]));
+            }}
+            onCopyDiagnostics={() => void copyDiagnostics()}
+            copied={copied}
+            onPauseSite={(p) => void pauseSite(p)}
+            onAllowSite={allowSite}
+            onApproveSession={() => void approveSession()}
+            onEndSession={() => void endSession()}
+            onSitesChanged={() => void refresh()}
+          />
+        </main>
+      ) : (
+        <>
+          <main className="scroll workspace">
+            {!hasTask && !uiError && (
+              <div className="empty">
+                <p>What can I do for you on this page?</p>
+              </div>
+            )}
 
-      {state.status === 'paused_loop' && state.sessionId && (
-        <LoopCard
-          summary={null}
-          onContinue={() => void sendToBackground({ type: 'ui/continue', sessionId: state.sessionId! })}
-          onStop={() => void sendToBackground({ type: 'ui/stop', sessionId: state.sessionId! })}
-        />
-      )}
+            {hasTask && state.prompt && <div className="msg-user">{state.prompt}</div>}
 
-      <div role="status" aria-live="polite">
-        {running && state.statusDetail && <p className="muted small">{state.statusDetail}</p>}
-        {state.status === 'stopped' && state.statusDetail && <p className="notice">{state.statusDetail}</p>}
-      </div>
-      {(uiError || (state.status === 'error' && state.lastError)) && (
-        <p className="error" role="alert">
-          {uiError ?? state.lastError}
-        </p>
-      )}
-      {state.status === 'completed' && state.finalResult && (
-        <section className="ok" role="status">
-          <strong>Result</strong>
-          <div style={{ whiteSpace: 'pre-wrap' }}>{state.finalResult}</div>
-        </section>
-      )}
-      {state.question && state.status === 'completed' && (
-        <QuestionCard
-          question={state.question}
-          onAnswer={(answer) => {
-            void sendToBackground({ type: 'ui/run_prompt', prompt: answer, tabId: tabId ?? undefined }).then((r) => {
-              if (!r.ok) setUiError(r.error);
-            });
-          }}
-        />
-      )}
-      {state.dryRunPayload && (
-        <section className="card">
-          <h2>Dry-run request (not sent)</h2>
-          <pre className="mono">{state.dryRunPayload}</pre>
-        </section>
-      )}
+            <div role="status" aria-live="polite" className="progress">
+              {running && (
+                <p className="muted">
+                  {STATUS_LABEL[state.status]}
+                  {state.statusDetail ? ` · ${state.statusDetail}` : ''}
+                  {state.step > 0 ? ` (step ${state.step})` : ''}
+                </p>
+              )}
+              {state.status === 'stopped' && state.statusDetail && <p className="notice">{state.statusDetail}</p>}
+            </div>
 
-      {state.proposal && (
-        <ActionPreview
-          proposal={state.proposal}
-          status={state.status}
-          pageChanged={state.pageChanged}
-          onApprove={() => void sendToBackground({ type: 'ui/approve', sessionId: state.sessionId!, actionId: state.proposal!.actionId })}
-          onReject={() => void sendToBackground({ type: 'ui/reject', sessionId: state.sessionId!, actionId: state.proposal!.actionId })}
-          onPreview={() => void sendToBackground({ type: 'ui/preview', sessionId: state.sessionId!, actionId: state.proposal!.actionId })}
-        />
+            {state.status === 'paused_loop' && state.sessionId && (
+              <LoopCard
+                summary={null}
+                onContinue={() => void sendToBackground({ type: 'ui/continue', sessionId: state.sessionId! })}
+                onStop={() => void sendToBackground({ type: 'ui/stop', sessionId: state.sessionId! })}
+              />
+            )}
+
+            {state.proposal && (
+              <ActionPreview
+                proposal={state.proposal}
+                status={state.status}
+                pageChanged={state.pageChanged}
+                onApprove={() => void sendToBackground({ type: 'ui/approve', sessionId: state.sessionId!, actionId: state.proposal!.actionId })}
+                onReject={() => void sendToBackground({ type: 'ui/reject', sessionId: state.sessionId!, actionId: state.proposal!.actionId })}
+                onPreview={() => void sendToBackground({ type: 'ui/preview', sessionId: state.sessionId!, actionId: state.proposal!.actionId })}
+              />
+            )}
+
+            {(uiError || (state.status === 'error' && state.lastError)) && (
+              <p className="error" role="alert">
+                {uiError ?? state.lastError}
+              </p>
+            )}
+            {state.status === 'completed' && state.finalResult && (
+              <section className="msg-result" role="status">
+                <div style={{ whiteSpace: 'pre-wrap' }}>{state.finalResult}</div>
+              </section>
+            )}
+            {state.question && state.status === 'completed' && (
+              <QuestionCard
+                question={state.question}
+                onAnswer={(answer) => {
+                  void sendToBackground({ type: 'ui/run_prompt', prompt: answer }).then((r) => {
+                    if (!r.ok) setUiError(r.error);
+                  });
+                }}
+              />
+            )}
+            {state.dryRunPayload && (
+              <details className="more" open>
+                <summary>Dry-run request (not sent)</summary>
+                <pre className="mono">{state.dryRunPayload}</pre>
+              </details>
+            )}
+            <ExtractedDataView items={state.extracted} />
+            <LogDropdown entries={log} runId={state.runId} />
+          </main>
+
+          <div className="dock">
+            {blocker && <AccessNotice key={`${blocker.action}:${blocker.message}`} blocker={blocker} onAction={onBlockerAction} />}
+            <Composer
+              value={prompt}
+              onChange={setPrompt}
+              onRun={() => void run()}
+              onStop={() => {
+                if (state.sessionId) void sendToBackground({ type: 'ui/stop', sessionId: state.sessionId });
+              }}
+              running={running}
+              blocked={blocker !== null}
+            />
+          </div>
+        </>
       )}
-
-      <ExtractedDataView items={state.extracted} />
-      <ActivityLog
-        entries={log}
-        onClear={() => {
-          void sendToBackground({ type: 'ui/clear_log' }).then(() => setLog([]));
-        }}
-      />
-
-      <footer className="row spread small muted">
-        <span>WebPilot only controls elements inside the page DOM.</span>
-        <button type="button" onClick={() => void copyDiagnostics()}>
-          {copied ? 'Copied ✓' : 'Copy diagnostic report'}
-        </button>
-      </footer>
     </div>
   );
 }

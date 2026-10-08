@@ -12,16 +12,20 @@ export const UiMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('ui/run_prompt'),
     prompt: z.string().trim().min(1).max(2000),
-    /** The tab to run on. Pages that know their own tab must send it; the worker never guesses "active". */
-    tabId: z.number().int().optional(),
   }),
+  /** Answer a question from a session (decision window). The session id names the tab, never the UI. */
+  z.object({ type: z.literal('ui/answer'), sessionId: z.string(), answer: z.string().trim().min(1).max(2000) }),
+  /** The user allows WebPilot on the origin their panel's tab is showing right now. */
+  z.object({ type: z.literal('ui/approve_session') }),
+  /** End this tab's session: cancels work and closes its panel. */
+  z.object({ type: z.literal('ui/end_session') }),
   z.object({ type: z.literal('ui/approve'), sessionId: z.string(), actionId: z.string() }),
   z.object({ type: z.literal('ui/reject'), sessionId: z.string(), actionId: z.string() }),
   z.object({ type: z.literal('ui/preview'), sessionId: z.string(), actionId: z.string() }),
   z.object({ type: z.literal('ui/continue'), sessionId: z.string() }),
   z.object({ type: z.literal('ui/stop'), sessionId: z.string() }),
   z.object({ type: z.literal('ui/stop_all') }),
-  z.object({ type: z.literal('ui/get_state'), tabId: z.number().int().optional() }),
+  z.object({ type: z.literal('ui/get_state') }),
   z.object({ type: z.literal('ui/get_decisions') }),
   z.object({ type: z.literal('ui/get_settings') }),
   z.object({
@@ -36,7 +40,7 @@ export const UiMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ui/remove_site'), host: z.string().min(1).max(253) }),
   z.object({ type: z.literal('ui/pause_site'), host: z.string().min(1).max(253), paused: z.boolean() }),
   z.object({ type: z.literal('ui/ack_disclosure') }),
-  z.object({ type: z.literal('ui/get_diagnostics'), tabId: z.number().int().optional() }),
+  z.object({ type: z.literal('ui/get_diagnostics') }),
 ]);
 export type UiMessage = z.infer<typeof UiMessageSchema>;
 
@@ -46,14 +50,17 @@ export const ToContentMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('cs/collect_map') }),
   z.object({
     type: z.literal('cs/highlight'),
+    /** The document the target was found in. A replaced document refuses the action. */
+    docId: z.string(),
     targetId: TargetIdSchema,
     fingerprint: z.string(),
     label: z.string().max(200),
   }),
-  z.object({ type: z.literal('cs/scroll_to_target'), targetId: TargetIdSchema, fingerprint: z.string() }),
+  z.object({ type: z.literal('cs/scroll_to_target'), docId: z.string(), targetId: TargetIdSchema, fingerprint: z.string() }),
   z.object({ type: z.literal('cs/clear_highlight') }),
   z.object({
     type: z.literal('cs/execute'),
+    docId: z.string(),
     action: ExecutableActionSchema,
     /** Fingerprint of the target as shown to the user; absent for scroll. */
     fingerprint: z.string().optional(),

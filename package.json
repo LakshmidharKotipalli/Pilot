@@ -1,6 +1,6 @@
 {
   "name": "webpilot-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Chrome MV3 side-panel agent that plans one safe, confirmed browser action at a time.",
@@ -9,7 +9,8 @@
     "build": "rimraf dist && vite build --mode ui && vite build --mode background && vite build --mode content",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "logs": "node scripts/logServer.mjs"
   },
   "dependencies": {
     "react": "^19.3.0",

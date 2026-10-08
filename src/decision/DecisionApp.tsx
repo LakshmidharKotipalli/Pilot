@@ -103,7 +103,7 @@ export default function DecisionApp() {
       {current.kind === 'question' && current.question && (
         <QuestionCard
           question={current.question}
-          onAnswer={(answer) => void send({ type: 'ui/run_prompt', prompt: answer, tabId: current.tabId })}
+          onAnswer={(answer) => void send({ type: 'ui/answer', sessionId: current.sessionId, answer })}
         />
       )}
 

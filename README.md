@@ -147,6 +147,20 @@ Not requested: `debugger`, `nativeMessaging`, `downloads`, `history`, `tabs`, `<
 Because `tabs` is absent, Chrome only reveals a tab’s URL after you click the toolbar icon or allow the site; until then
 the panel says “click the WebPilot toolbar icon on this tab”.
 
+## Tab ownership: a session belongs to the tab it was opened on
+
+- **Opening.** Clicking the toolbar icon on tab A binds a panel to A (`chrome.sidePanel.setOptions({tabId, path, enabled})`, then `open({tabId})`, in the same tick so the user gesture survives). The manifest declares no global side panel, so tabs you never opened WebPilot on never show one. The panel's URL carries a worker-issued binding id; the worker takes the tab from that id and ignores any tab id a page sends.
+- **Approval.** Before anything on the page is read, injected into, or sent to the model, the panel asks “Allow WebPilot on *host*?”. This per-tab approval is separate from Chrome's `activeTab` grant and from persistent host permission, and it is required even when the browser already allows access. Declining leaves WebPilot inactive.
+- **Switching tabs.** Nothing listens for tab switches or window focus. A run keeps going on its own tab; returning to it shows the latest progress or result, with no Resume. Opening WebPilot on tab B creates a separate session (even on the same origin) with its own approval and state.
+- **Every action** goes to the owner tab's top frame and is pinned to the document that was read (`docId`); if the page was replaced since, the action is refused and re-planned, never replayed. The only places that could pick the “active tab” (`tabs.query`, `captureVisibleTab`) are absent, and a test fails if they appear.
+- **Navigation.** Same-origin: the session continues and stale actions are refused. Another origin, or an address WebPilot can no longer read: the run stops, approval is withdrawn, and you must allow WebPilot again (toolbar icon on that tab if access was lost). WebPilot no longer navigates back by itself.
+- **Closing.** *Stop* cancels the task. *End session on this tab* (Settings → Site permissions) cancels it, removes the binding and disables the tab's panel. Closing the tab ends its session. Closing the panel with the browser's own close button only hides it: the task continues and the toolbar icon re-attaches to the same session.
+- **Worker restart.** Bindings (tab, URL, approved origin; no page content) live in `storage.session`. A run that was active is reported as interrupted and never resumed or replayed.
+
+Limitations: Chrome has no documented side-panel “closed” event in the supported versions, so a native close is indistinguishable from hiding. Background tabs may be throttled or discarded by the browser; WebPilot reports a failure rather than bringing the tab forward. Behaviour that needs a real browser (panel hide/show on tab switch, whether `activeTab` survives a same-origin navigation, `sender.url` including the panel's query string) is listed in the manual checklist and has not been verified here.
+
+Manual checklist (Chrome ≥ 116, load `dist/` unpacked): (1) open WebPilot on tab A: header shows A's host, an “Allow WebPilot on …?” prompt appears and nothing runs; (2) allow, start a task, switch to tab B: no panel appears on B; (3) open a new tab C: still no panel, B and C untouched; (4) return to A: progress/result is shown, no Resume; (5) click the icon on B: a separate prompt and session; (6) navigate A to another site mid-run: the run stops and asks again; (7) reload A (same site): approval holds, no stale click is performed; (8) Stop, End session, and closing A each end A's work only; (9) reload the extension while a run is active: it is reported interrupted and nothing re-runs; (10) tabs in two windows keep their own sessions.
+
 ## What is sent to the LLM
 
 Sent: your instruction (card/SSN/API-key-looking strings redacted), page URL and title, up to ~40 short visible text
@@ -241,3 +255,17 @@ password input, and some JS that can remove/replace elements.
   system notification announces the new one. Low-risk approvals can be approved or rejected from the notification;
   high-risk ones must be approved in the review window.
 * Chrome throttles background tabs, so a run on a tab you are not looking at may be slower to settle.
+
+## Run logs on disk (development aid)
+An extension cannot write into the project folder, so a tiny local collector does it:
+
+```
+npm run logs        # listens on 127.0.0.1:8787, writes ./logs/<time>_<host>_<runid>.json
+```
+
+While it is running, the extension posts every activity-log row to it and the server keeps **one JSON file per run**
+(`runId`, `host`, `prompt`, and one entry per step whose outcome updates in place). When the server is not running the
+extension skips this silently and retries after 30 seconds. `logs/` is in `.gitignore`.
+Rows are the same redacted, truncated rows shown in the Activity log; the server accepts posts only from browser
+extensions (not web pages), only on localhost, and only writes inside the log folder. `LOG_PORT` and `LOG_DIR` override
+the defaults (if you change the port, change `RUN_LOG_URL` in `src/shared/constants.ts` to match).

@@ -27,6 +27,7 @@ import { appendLog, upsertLog } from './activityLog';
 import { debugLog, recordError, setDebug } from './debug';
 import { LlmError, buildChatPayload, requestAction, type PlanContext } from './llmClient';
 import { LoopGuard, stepSignature } from './loopGuard';
+import { emitRunLog } from './runLogSink';
 import { isInScope, originOf, scopeViolation } from './scope';
 import { getApiKey, getSettings, isDisclosureAcknowledged } from './settings';
 import {
@@ -34,6 +35,7 @@ import {
   ensureContentScript,
   isPortClosedError,
   sendToContent,
+  sendToTab,
   sleep,
   waitForTabComplete,
 } from './tabs';
@@ -62,6 +64,10 @@ export interface SessionDeps {
   /** Something visible changed: persist all sessions and broadcast this one. */
   onChange(session: Session): void;
   onLog(entry: LogEntry): void;
+  /** The origin the user approved for this tab's session, or null when there is no approval. */
+  approvedOrigin(tabId: number): string | null;
+  /** Drop the approval for this tab (it navigated somewhere the user has not approved). */
+  revokeApproval(tabId: number): void;
 }
 
 export const RESTART_MESSAGE =
@@ -94,6 +100,8 @@ export class Session {
   private question: string | null = null;
   private loopSummary: string | null = null;
   private dryRunPayload: string | null = null;
+  /** Identity of the document the last page map came from; every action is pinned to it. */
+  private docId: string | null = null;
   private history: HistoryItem[] = [];
   private lastQuestion: { question: string; goal: string } | null = null;
   private pending: { actionId: string; resolve: (d: Decision) => void } | null = null;
@@ -217,6 +225,7 @@ export class Session {
       finalResult: this.finalResult,
       question: this.question,
       dryRunPayload: this.dryRunPayload,
+      binding: null, // filled in by the SessionManager, which owns the tab binding
     };
   }
 
@@ -275,6 +284,7 @@ export class Session {
     /* An id means "this step's row": update it in place instead of adding a second one. */
     const entry = e.id ? await upsertLog({ ...base, id: e.id }) : await appendLog(base);
     this.deps.onLog(entry);
+    emitRunLog(entry, this.host);
     debugLog('log', { outcome: entry.outcome, action: entry.actionType });
   }
 
@@ -343,9 +353,14 @@ export class Session {
     }
     const tab = await chrome.tabs.get(this.tabId).catch(() => null);
     if (!tab?.id) return abortWith('The tab for this run was not found.');
-    const verdict = evaluateSite(tab.url, settings, tab.incognito);
+    const approved = this.deps.approvedOrigin(this.tabId);
+    if (!approved) return abortWith('Allow WebPilot on this page first. Nothing was read or sent.', 'blocked');
+    if (tab.url === undefined || originOf(tab.url) !== approved) {
+      return abortWith('This tab is no longer on the page you approved. Allow WebPilot on the current page first.', 'blocked');
+    }
+    const verdict = evaluateSite(tab.url, settings, tab.incognito, true);
     this.host = verdict.host;
-    this.startOrigin = originOf(tab.url);
+    this.startOrigin = approved;
     this.failures = 0;
     if (!verdict.allowed) return abortWith(verdict.message, 'blocked');
     if (!settings.dryRun) {
@@ -387,10 +402,12 @@ export class Session {
   async preview(actionId: string): Promise<boolean> {
     if (this.proposal?.actionId !== actionId || !this.proposalTarget) return false;
     try {
+      if (!this.docId) return false;
       const r = await sendToContent(
         this.tabId,
         {
           type: 'cs/highlight',
+          docId: this.docId,
           targetId: this.proposalTarget.id,
           fingerprint: this.proposalTarget.fingerprint,
           label: truncate(this.proposal.summary, 80),
@@ -434,7 +451,7 @@ export class Session {
 
   private async clearHighlight(): Promise<void> {
     try {
-      await chrome.tabs.sendMessage(this.tabId, { type: 'cs/clear_highlight' });
+      await sendToTab(this.tabId, { type: 'cs/clear_highlight' });
     } catch {
       /* page gone or script not injected */
     }
@@ -444,13 +461,25 @@ export class Session {
     await ensureContentScript(tabId);
     const r = await sendToContent(tabId, { type: 'cs/collect_map' }, MapResponseSchema);
     if (!r.ok) throw new UserError(r.message);
+    this.docId = r.docId;
     return r.map;
+  }
+
+  /** The docId the current actions are pinned to. Throws when nothing has been read yet. */
+  private pinned(): string {
+    if (!this.docId) throw new UserError('The page has not been read yet.');
+    return this.docId;
   }
 
   private async assertTabStillAllowed(tabId: number, settings: Settings): Promise<string | null> {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return 'The tab was closed.';
-    const v = evaluateSite(tab.url, settings, tab.incognito);
+    const approved = this.deps.approvedOrigin(tabId);
+    if (!approved) return 'Approval for this tab was withdrawn, so WebPilot stopped. Allow WebPilot on the page to continue.';
+    if (tab.url !== undefined && originOf(tab.url) !== approved) {
+      return `This tab moved to another site, so approval for ${approved} no longer applies. Allow WebPilot on the new page to continue.`;
+    }
+    const v = evaluateSite(tab.url, settings, tab.incognito, true);
     return v.allowed ? null : v.message;
   }
 
@@ -504,24 +533,20 @@ export class Session {
   private async ensureInScope(ctx: RunCtx, tabId: number): Promise<boolean> {
     const origin = this.startOrigin;
     if (!origin) return true;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const tab = await chrome.tabs.get(tabId).catch(() => null);
-      this.assertCurrent(ctx);
-      if (!tab || tab.url === undefined || isInScope(origin, tab.url)) return true;
-      if (attempt === 2) break;
-      const left = originOf(tab.url) ?? 'another page';
-      if (!(await this.recover(ctx, { actionType: 'run', actionSummary: 'Left the site: going back' }, 'blocked', `The page left ${origin} for ${left}. Stay on this site`))) {
-        return false;
-      }
-      try {
-        await chrome.tabs.goBack(tabId);
-      } catch {
-        break;
-      }
-      await waitForTabComplete(tabId);
-      this.assertCurrent(ctx);
-    }
-    this.fail(ctx, `The page left ${origin} and could not be brought back.`);
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    this.assertCurrent(ctx);
+    if (!tab) return true; // a closed tab is reported by the caller
+    if (tab.url !== undefined && isInScope(origin, tab.url)) return true;
+    // The tab left the approved origin (or its address can no longer be read). Pause: nothing is clicked on a
+    // page the user has not approved, and nothing navigates the tab back on its own.
+    this.deps.revokeApproval(tabId);
+    const left = tab.url === undefined ? null : originOf(tab.url);
+    this.finishStopped(
+      ctx,
+      left
+        ? `The tab moved from ${origin} to ${left}, so WebPilot stopped. Allow WebPilot on the new page to continue.`
+        : 'Page access needed: WebPilot can no longer see this tab. Click the toolbar icon on this tab, then allow WebPilot again.',
+    );
     return false;
   }
 
@@ -666,7 +691,7 @@ export class Session {
             if (isMutating(action) && !target.inViewport) {
               const r = await sendToContent(
                 tabId,
-                { type: 'cs/scroll_to_target', targetId: target.id, fingerprint: target.fingerprint },
+                { type: 'cs/scroll_to_target', docId: this.pinned(), targetId: target.id, fingerprint: target.fingerprint },
                 SimpleContentResponseSchema,
               );
               this.assertCurrent(ctx);
@@ -731,7 +756,7 @@ export class Session {
           if (target) {
             const h = await sendToContent(
               tabId,
-              { type: 'cs/highlight', targetId: target.id, fingerprint: target.fingerprint, label: truncate(proposal.summary, 80) },
+              { type: 'cs/highlight', docId: this.pinned(), targetId: target.id, fingerprint: target.fingerprint, label: truncate(proposal.summary, 80) },
               SimpleContentResponseSchema,
             );
             this.assertCurrent(ctx);
@@ -772,7 +797,7 @@ export class Session {
           try {
             result = await sendToContent(
               tabId,
-              { type: 'cs/execute', action, fingerprint: target?.fingerprint },
+              { type: 'cs/execute', docId: this.pinned(), action, fingerprint: target?.fingerprint },
               ExecResultSchema,
             );
           } catch (e) {
