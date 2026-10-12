@@ -5,7 +5,7 @@ import type { Session } from './session';
 import type { SessionManager } from './sessionManager';
 
 const DECISION_PAGE = 'decision/index.html';
-const ICON = 'icons/webpilot-128.png';
+const ICON = 'icons/pilot-128.png';
 const NOTICE_PREFIX = 'notice:';
 const DECISION_PREFIX = 'decision:';
 
@@ -121,8 +121,8 @@ export class DecisionCenter {
     if (previous !== status) {
       void this.panelShowing(s.tabId).then((showing) => {
         if (showing) return;
-        if (status === 'completed') this.notice(s, 'WebPilot finished', `Done${s.getHost() ? ` on ${s.getHost()}` : ''}: ${truncate(s.getPrompt(), 80)}`);
-        else if (status === 'error') this.notice(s, 'WebPilot run failed', `A run${s.getHost() ? ` on ${s.getHost()}` : ''} stopped with an error. Open WebPilot to see why.`);
+        if (status === 'completed') this.notice(s, 'Pilot finished', `Done${s.getHost() ? ` on ${s.getHost()}` : ''}: ${truncate(s.getPrompt(), 80)}`);
+        else if (status === 'error') this.notice(s, 'Pilot run failed', `A run${s.getHost() ? ` on ${s.getHost()}` : ''} stopped with an error. Open Pilot to see why.`);
       });
     }
   }
@@ -152,7 +152,7 @@ export class DecisionCenter {
     const labels: string[] = [];
     if (d.kind === 'approval' && d.proposal) {
       const high = d.proposal.risk.risk === 'high';
-      title = high ? 'WebPilot: HIGH-RISK action needs approval' : 'WebPilot needs your approval';
+      title = high ? 'Pilot: HIGH-RISK action needs approval' : 'Pilot needs your approval';
       message = `${notificationSummary(d.proposal, d.proposal.targetDescription)}${where}`;
       if (high) {
         message += '. Open the review window to decide.';
@@ -163,12 +163,12 @@ export class DecisionCenter {
       actions.push('reject');
       labels.push('Reject');
     } else if (d.kind === 'loop') {
-      title = 'WebPilot may be stuck in a loop';
+      title = 'Pilot may be stuck in a loop';
       message = `The agent keeps repeating a step${where}. Open the review window to continue or stop.`;
       actions.push('stop');
       labels.push('Stop');
     } else {
-      title = 'WebPilot has a question for you';
+      title = 'Pilot has a question for you';
       message = `Open the review window to answer${where}.`;
     }
     const id = DECISION_PREFIX + d.sessionId;

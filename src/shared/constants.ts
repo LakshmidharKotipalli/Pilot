@@ -1,4 +1,4 @@
-export const EXTENSION_NAME = 'WebPilot Agent';
+export const EXTENSION_NAME = 'Pilot';
 
 export const DEFAULT_API_BASE_URL = 'https://opencode.ai/zen/v1';
 
@@ -38,7 +38,7 @@ export const MAX_CONSECUTIVE_FAILURES = 6;
 /** Where `npm run logs` listens; the extension posts each activity-log row here when it is running. */
 export const RUN_LOG_URL = 'http://127.0.0.1:8787/log';
 /** Name of the port a side panel keeps open while it is alive. */
-export const PANEL_PORT = 'webpilot-panel';
+export const PANEL_PORT = 'pilot-panel';
 export const NAVIGATION_WAIT_MS = 10_000;
 
 export const STORAGE_KEYS = {

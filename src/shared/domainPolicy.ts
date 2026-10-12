@@ -51,7 +51,7 @@ export function evaluateSite(
   url: string | undefined | null,
   settings: DomainSettings,
   incognito = false,
-  /** The user approved WebPilot on this tab's current origin for this session. */
+  /** The user approved Pilot on this tab's current origin for this session. */
   sessionApproved = false,
 ): SiteVerdict {
   const host = hostFromUrl(url);
@@ -72,7 +72,7 @@ export function evaluateSite(
       allowed: false,
       paused: false,
       message:
-        'Page access needed: WebPilot cannot see this tab’s address. Click the WebPilot toolbar icon on this tab to grant access again. (Browser-internal pages are never available.)',
+        'Page access needed: Pilot cannot see this tab’s address. Click the Pilot toolbar icon on this tab to grant access again. (Browser-internal pages are never available.)',
     };
   }
   if (incognito) {
@@ -81,7 +81,7 @@ export function evaluateSite(
       code: 'blocked',
       allowed: false,
       paused: false,
-      message: 'WebPilot does not run in private (incognito) windows.',
+      message: 'Pilot does not run in private (incognito) windows.',
     };
   }
   const blockedHit = settings.blockedDomainPatterns.find((p) => matchesHostPattern(host, p));
@@ -102,7 +102,7 @@ export function evaluateSite(
       allowed: false,
       paused: false,
       message:
-        'This looks like a sign-in, identity, or MFA page. WebPilot does not read these pages. No page content was collected or sent.',
+        'This looks like a sign-in, identity, or MFA page. Pilot does not read these pages. No page content was collected or sent.',
     };
   }
   const allowed = sessionApproved || settings.allowedDomains.some((d) => matchesHostPattern(host, d));
@@ -112,7 +112,7 @@ export function evaluateSite(
       code: 'not_allowlisted',
       allowed: false,
       paused: false,
-      message: `WebPilot needs your approval before it reads or acts on “${host}”.`,
+      message: `Pilot needs your approval before it reads or acts on “${host}”.`,
     };
   }
   if (settings.pausedDomains.some((d) => matchesHostPattern(host, d))) {
@@ -121,7 +121,7 @@ export function evaluateSite(
       code: 'paused',
       allowed: false,
       paused: true,
-      message: `WebPilot is paused on “${host}”. Resume it to continue.`,
+      message: `Pilot is paused on “${host}”. Resume it to continue.`,
     };
   }
   return { host, code: 'ok', allowed: true, paused: false, message: 'Allowed' };

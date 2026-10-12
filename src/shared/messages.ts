@@ -15,7 +15,7 @@ export const UiMessageSchema = z.discriminatedUnion('type', [
   }),
   /** Answer a question from a session (decision window). The session id names the tab, never the UI. */
   z.object({ type: z.literal('ui/answer'), sessionId: z.string(), answer: z.string().trim().min(1).max(2000) }),
-  /** The user allows WebPilot on the origin their panel's tab is showing right now. */
+  /** The user allows Pilot on the origin their panel's tab is showing right now. */
   z.object({ type: z.literal('ui/approve_session') }),
   /** End this tab's session: cancels work and closes its panel. */
   z.object({ type: z.literal('ui/end_session') }),

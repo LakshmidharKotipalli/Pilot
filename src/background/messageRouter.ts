@@ -50,13 +50,13 @@ export function identify(senderUrl: string | undefined, mgr: SessionManager): Ca
   }
 }
 
-const UNBOUND = 'This WebPilot panel is not attached to a tab session. Click the WebPilot toolbar icon on the tab you want to use.';
+const UNBOUND = 'This Pilot panel is not attached to a tab session. Click the Pilot toolbar icon on the tab you want to use.';
 
 async function buildDiagnostics(mgr: SessionManager, tabId: number | null) {
   const s = await mgr.getSnapshot(tabId);
   const perms = await chrome.permissions.getAll();
   return {
-    extension: 'WebPilot Agent',
+    extension: 'Pilot',
     version: chrome.runtime.getManifest().version,
     generatedAt: new Date().toISOString(),
     currentDomain: s.site.host,

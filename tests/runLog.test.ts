@@ -37,7 +37,7 @@ describe('log server', () => {
   let port: number;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'webpilot-logs-'));
+    dir = await mkdtemp(join(tmpdir(), 'pilot-logs-'));
     server = createLogServer({ dir });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     port = (server.address() as AddressInfo).port;

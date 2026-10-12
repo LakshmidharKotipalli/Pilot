@@ -231,7 +231,7 @@ async function callChat(deps: LlmDeps, payload: ChatPayload): Promise<{ status: 
     if (deps.signal?.aborted) throw new LlmError('aborted', 'The request was cancelled.');
     throw new LlmError(
       'network',
-      `Could not reach the model endpoint. Check the API base URL, your network, and that WebPilot was granted access to that host in Settings. (${e instanceof Error ? e.message : 'network error'})`,
+      `Could not reach the model endpoint. Check the API base URL, your network, and that Pilot was granted access to that host in Settings. (${e instanceof Error ? e.message : 'network error'})`,
     );
   } finally {
     clearTimeout(timer);

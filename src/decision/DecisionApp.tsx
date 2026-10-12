@@ -55,7 +55,7 @@ export default function DecisionApp() {
   return (
     <div className="app">
       <header className="card">
-        <h1>WebPilot Agent</h1>
+        <h1>Pilot</h1>
         <div className="small muted">
           {decisions.length} {decisions.length === 1 ? 'decision is' : 'decisions are'} waiting. Runs continue in their own tabs.
         </div>

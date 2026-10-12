@@ -22,9 +22,9 @@ export function Header({ view, context, onOpenSettings, onBack }: Props) {
   return (
     <header className="topbar">
       <div className="brand">
-        <img className="brand-mark" src="../icons/webpilot-128.png" width="28" height="28" alt="" aria-hidden="true" />
+        <img className="brand-mark" src="../icons/pilot-128.png" width="28" height="28" alt="" aria-hidden="true" />
         <div className="brand-copy">
-          <h1>WebPilot</h1>
+          <h1>Pilot</h1>
           {context?.host && (
             <span className="site-context" title={context.title ?? undefined}>
               {context.host}

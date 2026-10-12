@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Local run-log collector for WebPilot Agent (development aid).
+ * Local run-log collector for Pilot (development aid).
  *
  * The extension cannot write into a project folder, so while this server is running it POSTs every
  * activity-log row here and the server keeps one JSON file per run in ./logs (git-ignored).
@@ -101,6 +101,6 @@ if (isMain) {
   const port = Number(process.env.LOG_PORT ?? 8787);
   const dir = resolve(process.env.LOG_DIR ?? 'logs');
   createLogServer({ dir }).listen(port, '127.0.0.1', () => {
-    console.log(`WebPilot log server: http://127.0.0.1:${port}/log  ->  ${dir}`);
+    console.log(`Pilot log server: http://127.0.0.1:${port}/log  ->  ${dir}`);
   });
 }

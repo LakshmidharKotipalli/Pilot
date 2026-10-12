@@ -169,7 +169,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-/** Open a tab's panel (as a toolbar click would), allow WebPilot on its page, then start a run. */
+/** Open a tab's panel (as a toolbar click would), allow Pilot on its page, then start a run. */
 async function go(m: SessionManager, prompt: string, tabId: number): Promise<void> {
   const b = m.openForTab({ id: tabId, windowId: 1, url: h.tabUrl[tabId] ?? urlOf(tabId), title: `Tab ${tabId}` });
   if (!b.approvedOrigin) await m.approveSession(b.bindingId);
@@ -239,7 +239,7 @@ describe('SessionManager', () => {
     const b = m.openForTab({ id: ACTIVE_TAB, url: 'https://www.chase.com/' });
     // The user cannot even approve a blocked site, so nothing can start and nothing is sent.
     await expect(m.approveSession(b.bindingId)).rejects.toThrow(/blocked-domain rule/);
-    await expect(m.start('do things', ACTIVE_TAB)).rejects.toThrow(/Allow WebPilot on this page first/);
+    await expect(m.start('do things', ACTIVE_TAB)).rejects.toThrow(/Allow Pilot on this page first/);
     expect(h.fetchCalls).toBe(0);
     expect(h.received).toHaveLength(0); // the page was never contacted
   });
@@ -708,7 +708,7 @@ describe('tab ownership', () => {
     h.script = { 'owned task': [CLICK] };
     const m = new SessionManager();
     m.openForTab({ id: TAB_A, windowId: 1, url: urlOf(TAB_A), title: 'A' });
-    await expect(m.start('owned task', TAB_A)).rejects.toThrow(/Allow WebPilot on this page first/);
+    await expect(m.start('owned task', TAB_A)).rejects.toThrow(/Allow Pilot on this page first/);
     expect(h.received).toHaveLength(0);
     expect(h.fetchCalls).toBe(0);
     expect(h.executed).toHaveLength(0);
@@ -719,7 +719,7 @@ describe('tab ownership', () => {
     h.script = { 'owned task': [CLICK, DONE] };
     const m = new SessionManager();
     await go(m, 'owned task', TAB_A);
-    // The user "opens" WebPilot on C and uses B: no panel, no approval, nothing from them reaches the manager.
+    // The user "opens" Pilot on C and uses B: no panel, no approval, nothing from them reaches the manager.
     m.openForTab({ id: TAB_C, windowId: 1, url: urlOf(TAB_C), title: 'C' });
     await untilStatus(m, TAB_A, 'completed');
     expect(touched()).toEqual([TAB_A]);
@@ -739,7 +739,7 @@ describe('tab ownership', () => {
       const text = fs.readFileSync(f, 'utf8');
       expect(text, f).not.toMatch(/tabs\.query\(/); // no active-tab lookups anywhere
       expect(text, f).not.toMatch(/captureVisibleTab/); // no active-tab screenshots
-      expect(text, f).not.toMatch(/tabs\.onActivated/); // switching tabs is not an event WebPilot reacts to
+      expect(text, f).not.toMatch(/tabs\.onActivated/); // switching tabs is not an event Pilot reacts to
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'public', 'manifest.json'), 'utf8')) as Record<string, unknown>;
     expect(manifest.side_panel).toBeUndefined(); // no global panel that follows the user
@@ -752,7 +752,7 @@ describe('tab ownership', () => {
     await go(m, 'task for a', TAB_A);
     const b = m.openForTab({ id: TAB_B, windowId: 1, url: urlOf(TAB_B), title: 'B' }); // same origin as A
     expect(b.approvedOrigin).toBeNull();
-    await expect(m.start('task for b', TAB_B)).rejects.toThrow(/Allow WebPilot/);
+    await expect(m.start('task for b', TAB_B)).rejects.toThrow(/Allow Pilot/);
     await untilStatus(m, TAB_A, 'completed');
     expect(m.sessionForTab(TAB_B)).toBeUndefined();
     expect((await snap(m, TAB_B)).prompt).toBe('');
@@ -806,7 +806,7 @@ describe('tab ownership', () => {
     await untilStatus(m, TAB_A, 'stopped');
     expect((await snap(m, TAB_A)).statusDetail).toMatch(/moved from https:\/\/example\.com to https:\/\/other\.example\.org/);
     expect(m.approve(m.sessionForTab(TAB_A)!.id, 'x')).toBe(false);
-    await expect(m.start('again', TAB_A)).rejects.toThrow(/Allow WebPilot on this page first/);
+    await expect(m.start('again', TAB_A)).rejects.toThrow(/Allow Pilot on this page first/);
     expect(h.executed).toHaveLength(0);
   });
 
@@ -853,7 +853,7 @@ describe('tab ownership', () => {
     m.handleTabClosed(TAB_A);
     expect(m.bindingForTab(TAB_A)).toBeUndefined();
     expect(m.sessionForTab(TAB_A)).toBeUndefined();
-    await expect(m.start('x', TAB_A)).rejects.toThrow(/no WebPilot session/);
+    await expect(m.start('x', TAB_A)).rejects.toThrow(/no Pilot session/);
     expect(m.bindingForTab(TAB_B)).toBeDefined();
     expect(h.executed).toHaveLength(0);
     expect(touched().filter((t) => t === TAB_B)).toEqual([]);

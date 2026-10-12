@@ -42,14 +42,14 @@ export function Composer({ value, onChange, onRun, onStop, running, blocked }: P
       }}
     >
       <label htmlFor="prompt" className="sr-only">
-        Task for WebPilot
+        Task for Pilot
       </label>
       <textarea
         id="prompt"
         ref={ref}
         value={value}
         rows={2}
-        placeholder="Ask WebPilot to do something on this page…"
+        placeholder="Ask Pilot to do something on this page…"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         maxLength={2000}

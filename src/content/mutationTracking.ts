@@ -1,4 +1,4 @@
-export const OVERLAY_HOST_ID = '__webpilot_overlay_host__';
+export const OVERLAY_HOST_ID = '__pilot_overlay_host__';
 
 export interface MutationTracker {
   isStale(): boolean;
@@ -8,7 +8,7 @@ export interface MutationTracker {
 }
 
 /**
- * Marks the interaction map stale when the DOM changes materially. Mutations inside WebPilot's
+ * Marks the interaction map stale when the DOM changes materially. Mutations inside Pilot's
  * own overlay are ignored. `onStale` fires once per fresh→stale transition (debounced).
  */
 export function createMutationTracker(doc: Document, onStale: () => void, debounceMs = 150): MutationTracker {

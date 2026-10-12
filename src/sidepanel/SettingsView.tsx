@@ -90,9 +90,9 @@ export function SettingsView({ state, log, reloadToken, onClearLog, onCopyDiagno
         </button>
       </div>
       <details className="more">
-        <summary>What WebPilot can do</summary>
+        <summary>What Pilot can do</summary>
         <p className="muted small">
-          WebPilot only controls elements inside the page DOM. It works only on sites you allow, and it asks before serious
+          Pilot only controls elements inside the page DOM. It works only on sites you allow, and it asks before serious
           actions according to the mode you choose under Agent behavior.
         </p>
       </details>

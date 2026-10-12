@@ -21,7 +21,7 @@ const PORT_CLOSED = /message channel closed|receiving end does not exist|message
 export function friendlyInjectionError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (UNREACHABLE.test(msg)) {
-    return 'WebPilot cannot access this page. It may be a browser-internal or protected page, or browser access to this tab was lost (for example after it navigated to another site). Click the WebPilot toolbar icon on this tab again.';
+    return 'Pilot cannot access this page. It may be a browser-internal or protected page, or browser access to this tab was lost (for example after it navigated to another site). Click the Pilot toolbar icon on this tab again.';
   }
   return `Could not reach the page: ${msg}`;
 }
