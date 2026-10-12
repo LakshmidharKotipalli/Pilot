@@ -5,7 +5,7 @@ import { clearHighlight, showHighlight } from './highlightOverlay';
 import { buildInteractionMap, findTarget } from './interactionMap';
 import { createMutationTracker } from './mutationTracking';
 
-type Disposable = { __webpilotDispose?: () => void };
+type Disposable = { __pilotDispose?: () => void };
 
 type Reply = ExecResult | MapResponse | { ok: true; docId?: string } | { ok: false; code: string; message: string };
 
@@ -13,7 +13,7 @@ function init(): void {
   const w = window as unknown as Disposable;
   // A re-injected script (or one orphaned by an extension reload) replaces the previous instance.
   try {
-    w.__webpilotDispose?.();
+    w.__pilotDispose?.();
   } catch {
     /* previous context is gone */
   }
@@ -95,7 +95,7 @@ function init(): void {
 
   chrome.runtime.onMessage.addListener(listener);
 
-  w.__webpilotDispose = () => {
+  w.__pilotDispose = () => {
     chrome.runtime.onMessage.removeListener(listener);
     tracker.stop();
     clearHighlight();

@@ -19,7 +19,7 @@ import { UserError } from './tabs';
 
 export type SessionListener = (session: Session) => void;
 
-/** What the toolbar click hands us about the tab the user invoked WebPilot on. */
+/** What the toolbar click hands us about the tab the user invoked Pilot on. */
 export interface TabInfo {
   id: number;
   windowId?: number;
@@ -162,14 +162,14 @@ export class SessionManager implements SessionDeps {
     return b;
   }
 
-  /** The user allows WebPilot on the page this binding's tab is showing now. Browser access is a separate matter. */
+  /** The user allows Pilot on the page this binding's tab is showing now. Browser access is a separate matter. */
   async approveSession(bindingId: string): Promise<void> {
     const b = this.bindings.get(bindingId);
-    if (!b) throw new UserError('This WebPilot session has ended. Click the toolbar icon to start again.');
+    if (!b) throw new UserError('This Pilot session has ended. Click the toolbar icon to start again.');
     const tab = await chrome.tabs.get(b.ownerTabId).catch(() => null);
     if (!tab) throw new UserError('The tab for this session was closed.');
     if (tab.url === undefined) {
-      throw new UserError('Page access needed: click the WebPilot toolbar icon on this tab, then allow WebPilot again.');
+      throw new UserError('Page access needed: click the Pilot toolbar icon on this tab, then allow Pilot again.');
     }
     const verdict = evaluateSite(tab.url, await getSettings(), tab.incognito, true);
     if (!verdict.allowed) throw new UserError(verdict.message);
@@ -240,8 +240,8 @@ export class SessionManager implements SessionDeps {
 
   /** Start a run on `tabId`, which the caller resolved from a validated binding (never from "the active tab"). */
   async start(rawPrompt: string, tabId: number): Promise<void> {
-    if (!this.bindingForTab(tabId)) throw new UserError('This tab has no WebPilot session. Click the toolbar icon on it.');
-    if (!this.approvedOrigin(tabId)) throw new UserError('Allow WebPilot on this page first. Nothing was read or sent.');
+    if (!this.bindingForTab(tabId)) throw new UserError('This tab has no Pilot session. Click the toolbar icon on it.');
+    if (!this.approvedOrigin(tabId)) throw new UserError('Allow Pilot on this page first. Nothing was read or sent.');
 
     // Check and register with no await in between, so two quick Run clicks cannot both get in.
     const existing = this.sessions.get(tabId);
@@ -354,8 +354,8 @@ export class SessionManager implements SessionDeps {
         .get(tabId)
         ?.stop(
           nowOrigin
-            ? `The tab moved from ${wasAt} to ${nowOrigin}, so WebPilot stopped. Allow WebPilot on the new page to continue.`
-            : 'Page access needed: WebPilot can no longer see this tab. Click the toolbar icon on this tab, then allow WebPilot again.',
+            ? `The tab moved from ${wasAt} to ${nowOrigin}, so Pilot stopped. Allow Pilot on the new page to continue.`
+            : 'Page access needed: Pilot can no longer see this tab. Click the toolbar icon on this tab, then allow Pilot again.',
         );
     } else if (info.url !== undefined) {
       b.generation++;

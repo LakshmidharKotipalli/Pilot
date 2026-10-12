@@ -122,8 +122,8 @@ export default function App() {
         <Header view="main" context={null} onOpenSettings={() => setView('settings')} onBack={() => setView('main')} />
         <main className="scroll workspace">
           <div className="empty">
-            <p>This WebPilot session has ended.</p>
-            <p className="small">Click the WebPilot toolbar icon on the tab you want to use.</p>
+            <p>This Pilot session has ended.</p>
+            <p className="small">Click the Pilot toolbar icon on the tab you want to use.</p>
           </div>
         </main>
       </div>

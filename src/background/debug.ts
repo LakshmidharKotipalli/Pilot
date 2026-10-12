@@ -14,7 +14,7 @@ export function debugLog(event: string, data?: unknown): void {
   const line = `${new Date().toISOString()} ${event}${data === undefined ? '' : ' ' + JSON.stringify(redactForLog(data))}`;
   recent.push(truncate(line, 500));
   if (recent.length > 50) recent.shift();
-  console.debug('[WebPilot]', line);
+  console.debug('[Pilot]', line);
 }
 
 export function recentDebug(): string[] {

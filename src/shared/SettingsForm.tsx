@@ -153,7 +153,7 @@ export function SettingsForm({ siteExtra, appearance, activity, reloadToken = 0,
 
       <section className="group" aria-labelledby="g-agent">
         <h2 id="g-agent">Agent behavior</h2>
-        <label htmlFor="mode-select">How much should WebPilot do on its own?</label>
+        <label htmlFor="mode-select">How much should Pilot do on its own?</label>
         <select id="mode-select" value={s.mode} onChange={(e) => set('mode', e.target.value as PublicSettings['mode'])}>
           <option value="autonomous">Autonomous (default): asks only before serious actions</option>
           <option value="assisted">Assisted: auto-runs only scrolling, expanding, tabs and reading</option>
@@ -185,7 +185,7 @@ export function SettingsForm({ siteExtra, appearance, activity, reloadToken = 0,
         <h2 id="g-sites">Site permissions</h2>
         {siteExtra}
         <p className="muted small" style={{ marginTop: 0 }}>
-          WebPilot does nothing on a site until you allow it. Exact host names (e.g. <code>example.com</code>); use{' '}
+          Pilot does nothing on a site until you allow it. Exact host names (e.g. <code>example.com</code>); use{' '}
           <code>*.example.com</code> for subdomains.
         </p>
         <ul className="plain">

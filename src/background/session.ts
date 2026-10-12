@@ -354,9 +354,9 @@ export class Session {
     const tab = await chrome.tabs.get(this.tabId).catch(() => null);
     if (!tab?.id) return abortWith('The tab for this run was not found.');
     const approved = this.deps.approvedOrigin(this.tabId);
-    if (!approved) return abortWith('Allow WebPilot on this page first. Nothing was read or sent.', 'blocked');
+    if (!approved) return abortWith('Allow Pilot on this page first. Nothing was read or sent.', 'blocked');
     if (tab.url === undefined || originOf(tab.url) !== approved) {
-      return abortWith('This tab is no longer on the page you approved. Allow WebPilot on the current page first.', 'blocked');
+      return abortWith('This tab is no longer on the page you approved. Allow Pilot on the current page first.', 'blocked');
     }
     const verdict = evaluateSite(tab.url, settings, tab.incognito, true);
     this.host = verdict.host;
@@ -475,9 +475,9 @@ export class Session {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return 'The tab was closed.';
     const approved = this.deps.approvedOrigin(tabId);
-    if (!approved) return 'Approval for this tab was withdrawn, so WebPilot stopped. Allow WebPilot on the page to continue.';
+    if (!approved) return 'Approval for this tab was withdrawn, so Pilot stopped. Allow Pilot on the page to continue.';
     if (tab.url !== undefined && originOf(tab.url) !== approved) {
-      return `This tab moved to another site, so approval for ${approved} no longer applies. Allow WebPilot on the new page to continue.`;
+      return `This tab moved to another site, so approval for ${approved} no longer applies. Allow Pilot on the new page to continue.`;
     }
     const v = evaluateSite(tab.url, settings, tab.incognito, true);
     return v.allowed ? null : v.message;
@@ -544,8 +544,8 @@ export class Session {
     this.finishStopped(
       ctx,
       left
-        ? `The tab moved from ${origin} to ${left}, so WebPilot stopped. Allow WebPilot on the new page to continue.`
-        : 'Page access needed: WebPilot can no longer see this tab. Click the toolbar icon on this tab, then allow WebPilot again.',
+        ? `The tab moved from ${origin} to ${left}, so Pilot stopped. Allow Pilot on the new page to continue.`
+        : 'Page access needed: Pilot can no longer see this tab. Click the toolbar icon on this tab, then allow Pilot again.',
     );
     return false;
   }

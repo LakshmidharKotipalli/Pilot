@@ -135,7 +135,7 @@ function doClick(el: Element, label: string): ExecResult {
 function doType(el: Element, text: string, clearFirst: boolean): ExecResult {
   const tag = el.tagName.toLowerCase();
   if (isSensitiveField(el)) {
-    return fail('SENSITIVE', 'This looks like a password, payment, identity or security field. WebPilot never types into these.');
+    return fail('SENSITIVE', 'This looks like a password, payment, identity or security field. Pilot never types into these.');
   }
   const isTextarea = tag === 'textarea';
   const isInput = tag === 'input' && TEXT_INPUT_TYPES.has((el.getAttribute('type') ?? '').toLowerCase());
@@ -169,7 +169,7 @@ function doSelect(el: Element, wanted: string): ExecResult {
   if (el.tagName.toLowerCase() !== 'select') {
     return fail('UNSUPPORTED', 'Only native <select> dropdowns are supported.');
   }
-  if (isSensitiveField(el)) return fail('SENSITIVE', 'This dropdown looks sensitive; WebPilot will not change it.');
+  if (isSensitiveField(el)) return fail('SENSITIVE', 'This dropdown looks sensitive; Pilot will not change it.');
   const select = el as HTMLSelectElement;
   const w = wanted.trim().toLowerCase();
   const opts = Array.from(select.options);
@@ -194,7 +194,7 @@ function doSetChecked(el: Element, checked: boolean): ExecResult {
   if (tag !== 'input' || (type !== 'checkbox' && type !== 'radio')) {
     return fail('UNSUPPORTED', 'Only native checkboxes and radio buttons are supported.');
   }
-  if (isSensitiveField(el)) return fail('SENSITIVE', 'This control looks sensitive; WebPilot will not change it.');
+  if (isSensitiveField(el)) return fail('SENSITIVE', 'This control looks sensitive; Pilot will not change it.');
   const input = el as HTMLInputElement;
   if (input.checked !== checked) {
     if (type === 'radio' && !checked) {
@@ -214,7 +214,7 @@ function visibleTextOf(el: Element): string {
 }
 
 function doExtract(el: Element, targetId: string, format: 'text' | 'table' | 'links'): ExecResult {
-  if (isSensitiveField(el)) return fail('SENSITIVE', 'WebPilot does not read sensitive fields.');
+  if (isSensitiveField(el)) return fail('SENSITIVE', 'Pilot does not read sensitive fields.');
   const base = { targetId: targetId as ExtractedData['targetId'] };
 
   if (format === 'text') {

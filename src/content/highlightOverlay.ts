@@ -50,7 +50,7 @@ export function showHighlight(el: Element, label: string, ttlMs = 60_000): void 
   const doc = el.ownerDocument;
   ensureHost(doc);
   current = el;
-  if (tag) tag.textContent = `WebPilot: ${label}`;
+  if (tag) tag.textContent = `Pilot: ${label}`;
   position();
   if (!listenersAttached && doc.defaultView) {
     doc.defaultView.addEventListener('scroll', position, true);

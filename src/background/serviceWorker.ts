@@ -14,7 +14,7 @@ decisions.register();
 enableRunLogSink();
 
 // The side panel belongs to the tab it was opened on. There is no global panel (the manifest declares no
-// default_path, and the default is switched off here), so an unopened tab never shows WebPilot.
+// default_path, and the default is switched off here), so an unopened tab never shows Pilot.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => undefined);
 chrome.sidePanel.setOptions({ enabled: false }).catch(() => undefined);
 

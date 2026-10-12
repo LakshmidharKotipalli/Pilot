@@ -194,7 +194,7 @@ describe('mutation tracking', () => {
 
     t.markFresh();
     const host = document.createElement('div');
-    host.id = '__webpilot_overlay_host__';
+    host.id = '__pilot_overlay_host__';
     document.body.appendChild(host);
     await new Promise((r) => setTimeout(r, 30));
     // appending the host to <body> is a body mutation, but changes inside it must not count

@@ -300,7 +300,7 @@ export const PanelStateSchema = z.object({
   finalResult: z.string().nullable(),
   question: z.string().nullable(),
   dryRunPayload: z.string().nullable(),
-  /** The panel's own binding: which tab it belongs to and whether the user approved WebPilot there. */
+  /** The panel's own binding: which tab it belongs to and whether the user approved Pilot there. */
   binding: z
     .object({
       bindingId: z.string(),
